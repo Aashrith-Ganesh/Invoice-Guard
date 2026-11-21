@@ -1,7 +1,7 @@
 """add documents table
 
 Revision ID: 1ce9bfa4db56
-Revises: dd75dbe236c5
+Revises: 61a7b39e25c0
 Create Date: 2026-11-21 15:00:27.506100
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '1ce9bfa4db56'
-down_revision: Union[str, Sequence[str], None] = 'dd75dbe236c5'
+down_revision: Union[str, Sequence[str], None] = '61a7b39e25c0'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

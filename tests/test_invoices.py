@@ -103,3 +103,45 @@ def test_arithmetic_validates_each_component(api, invoice, field, wrong):
     result = validate(api, invoice | {field: wrong})
     assert result["overall_status"] == "BLOCK"
     assert f"ARITHMETIC_{field.upper()}" in result["risk_indicators"]
+
+
+@pytest.mark.parametrize(("words", "status", "code"), [
+    ("Rupees one hundred and eighteen only", "PASS", "AMOUNT_IN_WORDS_MATCH"),
+    ("One hundred eighteen rupees and zero paise", "PASS", "AMOUNT_IN_WORDS_MATCH"),
+    ("INR ११८.००", "PASS", "AMOUNT_IN_WORDS_MATCH"),
+    ("One hundred and seventeen rupees only", "BLOCK", "AMOUNT_IN_WORDS_MISMATCH"),
+    ("One hundred eighteen rupees and one paisa", "BLOCK", "AMOUNT_IN_WORDS_MISMATCH"),
+    ("One hundred eighteen lakhs", "BLOCK", "AMOUNT_IN_WORDS_MISMATCH"),
+    ("one hundred eighteen more", "HOLD", "AMOUNT_IN_WORDS_UNRECOGNIZED"),
+    ("Rupees one hundred and eighteen paise", "HOLD", "AMOUNT_IN_WORDS_UNRECOGNIZED"),
+    ("minus one hundred and eighteen", "HOLD", "AMOUNT_IN_WORDS_UNRECOGNIZED"),
+    ("ஒரு நூறு", "HOLD", "AMOUNT_IN_WORDS_UNRECOGNIZED"),
+    ("", "HOLD", "AMOUNT_IN_WORDS_UNRECOGNIZED"),
+])
+def test_amount_in_words(api, invoice, words, status, code):
+    result = validate(api, invoice | {"total_in_words": words})
+    assert result["overall_status"] == status
+    assert code in {check["code"] for check in result["results"]}
+
+
+def test_indian_amount_in_words_lakh_crore_and_paise(api, invoice):
+    result = validate(api, invoice | {
+        "total_in_words": "Rupees one crore two lakh three thousand four hundred twenty-five and fifty paise only",
+        "grand_total": "10203425.50",
+    })
+    assert "AMOUNT_IN_WORDS_MATCH" in {check["code"] for check in result["results"]}
+
+
+def test_low_confidence_amount_in_words_holds(api, invoice):
+    result = validate(api, invoice | {
+        "total_in_words": "One hundred eighteen rupees",
+        "confidence": {"total_in_words": "0.40"},
+    })
+    assert result["overall_status"] == "HOLD"
+    assert "LOW_CONFIDENCE" in result["risk_indicators"]
+
+
+def test_non_json_invoice_returns_structured_error(api):
+    response = api[0].post(VALIDATE, content="this is not JSON", headers={"Content-Type": "text/plain"})
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "INVALID_INPUT"

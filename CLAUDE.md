@@ -20,8 +20,7 @@ to the owner in Tamil.
 
 ## Architecture
 
-Cashfree Relay (no-code, configured on the Cashfree dashboard, not in this repo) orchestrates four agents that call
-this service over HTTP:
+The planned Cashfree Relay deployment lives in the Cashfree dashboard. Its four workflows call this service over HTTP:
 1. **Invoice Intake:** webhook → Sarvam Extract → validate → router (BLOCK/HOLD → Tamil WhatsApp + Sheets; PASS → bank verification → Sheets)
 2. **Weekly Payment Run:** Friday schedule → priorities → Tamil voice call with batch summary + one-time code → WhatsApp fallback
 3. **Approval → Payout:** called only after the approval is confirmed → payout (`idempotency_key` per attempt) → Sheets
@@ -38,21 +37,23 @@ app/services/      validation, duplicate, vendor, prioritisation, invoice, appro
 app/models/        SQLAlchemy models; every table is business-scoped (business_id)
 app/schemas/       pydantic request/response models
 app/core/          config (env), security (token hash), exceptions (reject()), masking
-app/integrations/  cashfree/simulator.py (local payout simulator); sarvam/ = demo extractor, heuristic Prism stand-in,
-                   Sarvam translate (live only with SARVAM_API_KEY); relay/ is EMPTY
+app/integrations/  cashfree/simulator.py (local payouts); sarvam/ = Document AI and chat HTTP clients, plus the merchant
+                   app's offline stand-ins (demo extractor, heuristic Prism) and Mayura translate (live with SARVAM_API_KEY)
 frontend/          merchant app (static ES modules, no build step), served at /app
 scripts/           seed, demo, verify_demo_bank
 tests/             conftest (api fixture), test_invoices, test_payments, test_red_lines
 migrations/        Alembic
 ```
 
-### Endpoints (all under `/api/v1`, Bearer auth; `owner` vs `service` role)
+### Endpoints and authentication
 
 `POST invoices/validate`, `POST invoices/batch-validate`, `GET invoices/priorities`, `GET invoices/{id}`,
 `POST invoices/{id}/revalidate`, `POST approvals` (owner), `POST approvals/confirm` (owner),
 `POST payments/initiate`, `GET payments/{id}`, `POST webhooks/payout` (HMAC-signed), `GET /health`.
-Merchant app: `GET workspace`, `POST documents` (PDF), `GET documents`, `GET documents/{id}`, `GET documents/{id}/file`,
+The payment and validation routes use `/api/v1`. Sarvam document upload, status, completed-job validation, and translation use `/api/agents/sarvam`. Local agent runs use `/api/v1/agent-runs`; the only registered model tool is a tenant-scoped vendor lookup.
+Merchant app (`/api/v1`): `GET workspace`, `POST documents` (PDF), `GET documents`, `GET documents/{id}`, `GET documents/{id}/file`,
 `POST documents/{id}/review` (owner; verify|reject), `POST documents/{id}/translate`, `GET samples`, `GET samples/{name}`.
+
 Validation returns HTTP 200 with PASS/HOLD/BLOCK; 422 malformed, 401/403 auth, 404 scoped miss, 409 bad transition.
 
 ## Decisions (agreed by the team)
@@ -70,7 +71,7 @@ Validation returns HTTP 200 with PASS/HOLD/BLOCK; 422 malformed, 401/403 auth, 4
 Enforced in code **and** covered by tests. Never weaken, bypass or "temporarily" disable one. If a task needs to, stop and ask.
 
 1. Money never moves to an account not verified as the claimed vendor's (`vendor_service.verify_vendor`, `approval_service.require_eligible`).
-2. Approval can't be spoofed, replayed or given by accident: hashed single-use token, 15 min expiry, bound to invoice + amount + currency + bank account.
+2. Approval can't be spoofed, replayed or given by accident: hashed single-use token, 15 min expiry, bound to the owner, invoice, amount, currency, verified bank account and validation run.
 3. A retry never becomes a second payment: unique `idempotency_key`, unique `approval_id` per payment, no payout while an attempt exists unless the owner explicitly re-approves after FAILED/REVERSED.
 4. Every payment traces to its invoice, checks (`invoice_validations`), approval and `audit_log`.
 5. Never silently correct extracted data (`invoices.extracted` stores the submitted JSON). Never log full account numbers (`app/core/masking.py`; bank references are opaque `ref:`/`demo:` strings).
@@ -79,13 +80,13 @@ Test map: RL1 `test_invoices`/`test_payments`/`test_red_lines`; RL2 `test_paymen
 
 ## Known gaps vs the original spec (open work, in priority order)
 
-1. **Amount in words:** no check that `total_in_words` equals the figures (needs lakh/crore and Indian-script digit parsing).
-2. **Prism signals:** `app/integrations/sarvam/` is empty. Same-vendor-despite-spelling, disguised duplicate, amount-in-words via `client.decisions.create` (model `sarvam-prism`, `sarvamai>=0.1.43`). Prism may raise a HOLD, never clear a BLOCK.
+1. **Amount in words:** English INR wording with lakh/crore/paise and Unicode decimal digits is validated deterministically. Tamil and Hindi number words still require manual review.
+2. **Prism signals:** Sarvam chat, translation and extraction adapters exist. Same-vendor-despite-spelling, disguised duplicate, amount-in-words via `client.decisions.create` (model `sarvam-prism`, `sarvamai>=0.1.43`). Prism may raise a HOLD, never clear a BLOCK.
 3. **Weekly batch + one-time code:** no batch endpoint, no code bound to `batch_id` + total. Today approval is per invoice.
 4. **Real Cashfree sandbox payouts:** payouts are simulated (`integrations/cashfree/simulator.py`). Replace behind the same interface; keep sandbox-only.
 5. **Remaining spec gaps:** no bank name-match check from Secure ID; Udyam deadline logic exists but there is no "stop at available cash" batch selection.
 6. `GET /files/{name}` for synthetic invoice images is not built.
-7. Tamil text is produced downstream (Relay); this service returns English `failure_reasons` plus stable `risk_indicators` codes.
+7. The service emits English `failure_reasons` and stable `risk_indicators`. The Sarvam translation adapter can translate display text independently of validation.
 
 ## Conventions
 

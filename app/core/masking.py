@@ -26,8 +26,12 @@ def install_account_masking() -> None:
 
     def factory(*args, **kwargs):
         record = previous(*args, **kwargs)
-        record.msg = mask_text(record.getMessage())
-        record.args = None
+        if record.name == "uvicorn.access" and isinstance(record.args, tuple) and len(record.args) == 5:
+            # Uvicorn's formatter reads the structured access-log arguments directly.
+            record.args = tuple(mask_text(arg) if isinstance(arg, str) else arg for arg in record.args)
+        else:
+            record.msg = mask_text(record.getMessage())
+            record.args = None
         return record
 
     logging.setLogRecordFactory(factory)

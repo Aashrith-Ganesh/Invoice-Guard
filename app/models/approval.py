@@ -22,5 +22,7 @@ class Approval(BusinessRecord, Base):
     token_hash: Mapped[str]
     expires_at: Mapped[str]
     confirmed_at: Mapped[str | None]
+    owner_id: Mapped[str | None]
+    validation_run_id: Mapped[str | None]
     control_payment_id: Mapped[int | None]
     control_reason: Mapped[str | None]

@@ -1,0 +1,7 @@
+# Copy this block into your own Codex configuration and adjust the absolute paths.
+[mcp_servers.ps3_check_service]
+command = "/absolute/path/to/cashfree-check-service/.venv/bin/python"
+args = ["-m", "app.mcp_server.server"]
+cwd = "/absolute/path/to/cashfree-check-service"
+env_vars = ["CHECK_MCP_BASE_URL", "CHECK_MCP_SERVICE_TOKEN"]
+startup_timeout_sec = 20

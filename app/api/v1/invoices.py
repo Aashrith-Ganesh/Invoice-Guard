@@ -1,11 +1,12 @@
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Request
+from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import Actor, Database
+from app.api.dependencies import Actor, Database, ReadActor
 from app.core.exceptions import reject
 from app.database.session import write_transaction
 from app.models import Business, Invoice, VendorBankAccount
@@ -19,7 +20,10 @@ router = APIRouter(prefix="/invoices", tags=["invoices"])
 
 
 async def original_json(request: Request) -> dict:
-    return await request.json()
+    try:
+        return await request.json()
+    except ValueError:
+        raise RequestValidationError([{"loc": ("body",), "type": "json_invalid"}]) from None
 
 
 @router.post("/validate")
@@ -48,7 +52,7 @@ def batch_validate(items: Annotated[list[Any], Body(min_length=1, max_length=100
 
 
 @router.get("/priorities")
-def priorities(actor: Actor, engine: Database) -> list[Decision]:
+def priorities(actor: ReadActor, engine: Database) -> list[Decision]:
     with Session(engine) as session:
         business = session.get(Business, actor.business_id)
         invoices = session.scalars(select(Invoice).where(Invoice.business_id == business.id).order_by(Invoice.id))
@@ -57,7 +61,7 @@ def priorities(actor: Actor, engine: Database) -> list[Decision]:
 
 
 @router.get("/{invoice_id}")
-def get_invoice(invoice_id: int, actor: Actor, engine: Database) -> Decision:
+def get_invoice(invoice_id: int, actor: ReadActor, engine: Database) -> Decision:
     with Session(engine) as session:
         invoice = scoped_invoice(session, actor.business_id, invoice_id)
         return invoice_view(session, session.get(Business, actor.business_id), invoice)

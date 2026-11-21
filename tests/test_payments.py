@@ -183,3 +183,18 @@ def test_cross_business_reads(api, invoice, monkeypatch):
     headers = {"Authorization": "Bearer other-owner"}
     assert client.get(f"{ROOT}/invoices/{invoice_id}", headers=headers).status_code == 404
     assert client.get(f"{ROOT}/payments/{payment['payment_id']}", headers=headers).status_code == 404
+
+
+def test_legacy_approval_cannot_start_a_new_payment(api, invoice):
+    from app.models import Approval
+
+    client, engine = api
+    invoice_id = validate(api, invoice)["invoice_id"]
+    approval_id = approve(client, invoice_id)
+    with Session(engine) as session, session.begin():
+        approval = session.get(Approval, approval_id)
+        approval.owner_id = None
+        approval.validation_run_id = None
+    response = initiate(client, invoice_id, approval_id)
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "APPROVAL_REQUIRED"

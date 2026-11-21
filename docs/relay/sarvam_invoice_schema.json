@@ -1,0 +1,103 @@
+{
+  "type": "object",
+  "properties": {
+    "supplier_legal_name": {
+      "type": "string",
+      "description": "Legal name of the SELLER who issued the invoice (usually at the top, not the Bill To / buyer party). Copy exactly as printed. Empty string if not present."
+    },
+    "supplier_gstin": {
+      "type": "string",
+      "description": "15-character GSTIN of the SELLER who issued the invoice. Not the buyer's GSTIN under Bill To. Copy exactly as printed. Empty string if not present."
+    },
+    "buyer_gstin": {
+      "type": "string",
+      "description": "GSTIN printed under Bill To / Buyer / Recipient. Copy exactly as printed. Empty string if not present."
+    },
+    "invoice_number": {
+      "type": "string",
+      "description": "Invoice number exactly as printed, including any prefix, slashes or dashes. Empty string if not present."
+    },
+    "invoice_date": {
+      "type": "string",
+      "description": "Transcribe the invoice date. Use YYYY-MM-DD only when the date is unambiguous. Preserve the printed text if its ordering is ambiguous. Leave empty when absent."
+    },
+    "currency": {
+      "type": "string",
+      "description": "ISO 4217 currency code of the amounts, e.g. INR for Rs, Rs., INR or the rupee sign. Empty string if not stated."
+    },
+    "line_items": {
+      "type": "array",
+      "description": "Every row of the items table, in printed order. Do not merge, skip or add rows.",
+      "items": {
+        "type": "object",
+        "description": "One row of the items table.",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Item description as printed."
+          },
+          "hsn": {
+            "type": "string",
+            "description": "HSN or SAC code as printed. Empty string if none."
+          },
+          "quantity": {
+            "type": "string",
+            "description": "Quantity as a plain decimal using ASCII digits, without units or commas, e.g. 40 or 2.5. Empty string if not legible."
+          },
+          "unit_price": {
+            "type": "string",
+            "description": "Rate per unit as a plain decimal using ASCII digits, without commas or currency symbols, e.g. 1150.00. Empty string if not legible."
+          },
+          "amount": {
+            "type": "string",
+            "description": "Line amount as printed, as a plain decimal without commas, e.g. 46000.00. Do not calculate it. Empty string if not legible."
+          }
+        }
+      }
+    },
+    "subtotal": {
+      "type": "string",
+      "description": "Taxable value / subtotal before tax as printed, as a plain decimal without commas, e.g. 90000.00. Do not calculate. Empty string if not printed."
+    },
+    "cgst_rate": {
+      "type": "string",
+      "description": "CGST rate in percent as printed, as a plain number, e.g. 9. Empty string if the invoice shows no CGST."
+    },
+    "cgst": {
+      "type": "string",
+      "description": "CGST amount as printed, as a plain decimal without commas. Do not calculate. Empty string if the invoice shows no CGST."
+    },
+    "sgst_rate": {
+      "type": "string",
+      "description": "SGST (or UTGST) rate in percent as printed, as a plain number, e.g. 9. Empty string if the invoice shows no SGST."
+    },
+    "sgst": {
+      "type": "string",
+      "description": "SGST (or UTGST) amount as printed, as a plain decimal without commas. Do not calculate. Empty string if the invoice shows no SGST."
+    },
+    "igst_rate": {
+      "type": "string",
+      "description": "IGST rate in percent as printed, as a plain number, e.g. 18. Empty string if the invoice shows no IGST."
+    },
+    "igst": {
+      "type": "string",
+      "description": "IGST amount as printed, as a plain decimal without commas. Do not calculate. Empty string if the invoice shows no IGST."
+    },
+    "tax_total": {
+      "type": "string",
+      "description": "Total tax amount ONLY if printed as its own line, as a plain decimal without commas. Do not add up taxes yourself. Empty string if not printed."
+    },
+    "grand_total": {
+      "type": "string",
+      "description": "Final invoice total payable as printed in figures, as a plain decimal without commas, e.g. 106200.00. Do not calculate. Empty string if not legible."
+    },
+    "total_in_words": {
+      "type": "string",
+      "description": "The amount in words exactly as printed, in its original language and script. Do not translate, convert or correct it. Empty string if not present."
+    },
+    "bank_reference": {
+      "type": "string",
+      "description": "Transcribe a printed opaque ref: or demo: reference only. Leave empty when absent. Never return account numbers or infer a reference."
+    }
+  }
+}

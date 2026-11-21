@@ -11,7 +11,7 @@ from app.database.base import utc_now
 from app.models import Approval, AuditLog, Business, Invoice, Payment, Vendor
 from app.schemas.approval import ApprovalChallenge, ApprovalRequest, ApprovalView
 from app.schemas.invoice import ExtractedInvoice
-from app.services.invoice_service import scoped_invoice
+from app.services.invoice_service import current_validation_run, scoped_invoice
 from app.services.review_policy import primary_document, rating_cleared
 from app.services.validation_service import cash_check, minor
 from app.services.vendor_service import primary_account
@@ -62,7 +62,7 @@ def require_eligible(session: Session, business: Business, invoice: Invoice) -> 
             raise reject(409, check.code, check.detail)
 
 
-def approval_matches(approval: Approval, invoice: Invoice) -> bool:
+def approval_matches(approval: Approval, invoice: Invoice, run_id: str | None) -> bool:
     return (
         approval.business_id == invoice.business_id
         and approval.invoice_id == invoice.id
@@ -70,6 +70,9 @@ def approval_matches(approval: Approval, invoice: Invoice) -> bool:
         and approval.currency == invoice.currency
         and approval.bank_account_id == invoice.bank_account_id
         and approval.bank_verified_at == invoice.bank_verified_at
+        and approval.owner_id is not None
+        and run_id is not None
+        and approval.validation_run_id == run_id
         and approval.expires_at > utc_now()
     )
 
@@ -83,10 +86,13 @@ def approval_view(approval: Approval) -> ApprovalView:
     )
 
 
-def issue(session: Session, business: Business, request: ApprovalRequest) -> ApprovalChallenge:
+def issue(session: Session, business: Business, request: ApprovalRequest, *, owner_id: str) -> ApprovalChallenge:
     invoice = scoped_invoice(session, business.id, request.invoice_id)
     ensure_attempt_allowed(latest_payment(session, invoice), request.previous_payment_id)
     require_eligible(session, business, invoice)
+    run_id = current_validation_run(session, invoice)
+    if run_id is None:
+        raise reject(409, "INVOICE_INELIGIBLE", "Invoice validation evidence is missing.")
     token = token_urlsafe(32)
     approval = Approval(
         business_id=business.id, invoice_id=invoice.id, amount_minor=invoice.amount_minor,
@@ -94,26 +100,29 @@ def issue(session: Session, business: Business, request: ApprovalRequest) -> App
         bank_verified_at=invoice.bank_verified_at, token_hash=token_hash(token),
         expires_at=(datetime.now(UTC) + timedelta(minutes=15)).isoformat(timespec="microseconds"),
         control_payment_id=request.previous_payment_id, control_reason=request.reason,
+        owner_id=owner_id, validation_run_id=run_id,
     )
     session.add(approval)
     session.flush()
-    session.add(AuditLog(business_id=business.id, action="approval_issued", entity_id=approval.id))
+    session.add(AuditLog(business_id=business.id, action="approval_issued", entity_id=approval.id,
+                         details={"owner_id": owner_id, "validation_run_id": run_id}))
     return ApprovalChallenge(**approval_view(approval).model_dump(), token=token)
 
 
-def confirm(session: Session, business: Business, token: str) -> ApprovalView:
+def confirm(session: Session, business: Business, token: str, *, owner_id: str) -> ApprovalView:
     approval = session.scalar(select(Approval).where(
         Approval.business_id == business.id, Approval.token_hash == token_hash(token),
     ))
-    if approval is None or approval.confirmed_at is not None:
+    if approval is None or approval.confirmed_at is not None or approval.owner_id != owner_id:
         raise reject(409, "INVALID_APPROVAL", "Approval token is invalid or has already been used.")
     invoice = scoped_invoice(session, business.id, approval.invoice_id)
-    if not approval_matches(approval, invoice):
+    if not approval_matches(approval, invoice, current_validation_run(session, invoice)):
         raise reject(409, "STALE_APPROVAL", "Approval expired or its payment terms changed.")
     ensure_attempt_allowed(latest_payment(session, invoice), approval.control_payment_id)
     require_eligible(session, business, invoice)
     approval.confirmed_at = utc_now()
-    session.add(AuditLog(business_id=business.id, action="approval_confirmed", entity_id=approval.id))
+    session.add(AuditLog(business_id=business.id, action="approval_confirmed", entity_id=approval.id,
+                         details={"owner_id": owner_id, "validation_run_id": approval.validation_run_id}))
     return approval_view(approval)
 
 
@@ -126,4 +135,5 @@ def available_approval(session: Session, invoice: Invoice, previous: Payment | N
         Approval.control_payment_id == control_id, Approval.confirmed_at.is_not(None),
         Approval.expires_at > utc_now(),
     ))
-    return any(approval_matches(approval, invoice) for approval in approvals)
+    run_id = current_validation_run(session, invoice)
+    return any(approval_matches(approval, invoice, run_id) for approval in approvals)

@@ -30,18 +30,14 @@ class Line(BaseModel):
     unit_price: Money
 
 
-class ExtractedInvoice(BaseModel):
+class InvoicePreviewInput(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     invoice_number: Label | None = None
     invoice_date: date | None = None
-    acceptance_date: date | None = None
-    written_agreement: Annotated[bool, Field(strict=True)] | None = None
     currency: Annotated[str, Field(pattern=r"^[A-Z]{3}$")] | None = None
     gstin: Label | None = None
     legal_name: Label | None = None
-    bank_reference: BankReference | None = None
-    document_sha256: Annotated[str, Field(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
     lines: Annotated[list[Line], Field(min_length=1, max_length=500)] | None = None
     subtotal: Money | None = None
     cgst_rate: Rate | None = None
@@ -52,6 +48,7 @@ class ExtractedInvoice(BaseModel):
     igst: Money | None = None
     tax_total: Money | None = None
     grand_total: Money | None = None
+    total_in_words: Annotated[str, Field(max_length=300)] | None = None
     confidence: Annotated[dict[Label, Confidence], Field(max_length=100)] | None = None
 
     @field_validator("invoice_number")
@@ -66,12 +63,24 @@ class ExtractedInvoice(BaseModel):
     def normalize_gstin(cls, value: str | None) -> str | None:
         return value.upper() if value else None
 
-    @field_validator("invoice_date", "acceptance_date")
+    @field_validator("invoice_date")
     @classmethod
     def supported_date(cls, value: date | None) -> date | None:
         if value and not 1900 <= value.year <= 9900:
             raise ValueError("Date outside supported range")
         return value
+
+
+class ExtractedInvoice(InvoicePreviewInput):
+    acceptance_date: date | None = None
+    written_agreement: Annotated[bool, Field(strict=True)] | None = None
+    bank_reference: BankReference | None = None
+    document_sha256: Annotated[str, Field(pattern=r"^[a-fA-F0-9]{64}$")] | None = None
+
+    @field_validator("acceptance_date")
+    @classmethod
+    def supported_acceptance_date(cls, value: date | None) -> date | None:
+        return cls.supported_date(value)
 
 
 class RevalidateRequest(BaseModel):
