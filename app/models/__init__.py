@@ -6,10 +6,11 @@ from app.models.document_job import DocumentJob
 from app.models.invoice import Invoice
 from app.models.invoice_validation import InvoiceValidation
 from app.models.payment import Payment
+from app.models.payment_link import PaymentLink
 from app.models.vendor import Vendor
 from app.models.vendor_bank_account import VendorBankAccount
 
 __all__ = [
-    "Approval", "AuditLog", "Business", "Document", "DocumentJob", "Invoice", "InvoiceValidation", "Payment",
+    "Approval", "AuditLog", "Business", "Document", "DocumentJob", "Invoice", "InvoiceValidation", "Payment", "PaymentLink",
     "Vendor", "VendorBankAccount",
 ]

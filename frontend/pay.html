@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <title>PS3 payment simulation</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./pay.js"></script>
+</head>
+<body>
+  <main class="connect">
+    <article class="connect-card hosted-simulation">
+      <h1>Payment simulation</h1>
+      <p class="muted">PS3 demonstration. No money will move.</p>
+      <p id="payment-message" role="status" aria-live="polite">Loading simulation…</p>
+      <dl id="payment-details" hidden>
+        <dt>Invoice</dt><dd id="invoice-reference"></dd>
+        <dt>Vendor</dt><dd id="vendor-name"></dd>
+        <dt>Amount</dt><dd id="amount"></dd>
+        <dt>Payment reference</dt><dd id="payment-reference"></dd>
+        <dt>Expires</dt><dd id="expires-at"></dd>
+        <dt>Status</dt><dd id="payment-status"></dd>
+      </dl>
+      <button id="simulate-payment" class="btn btn-primary" type="button" hidden>Simulate Payment</button>
+    </article>
+  </main>
+</body>
+</html>

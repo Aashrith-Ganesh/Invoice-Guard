@@ -289,3 +289,9 @@ tfoot tr.total td { color: var(--ink); font: 400 26px/1.2 var(--serif); padding-
 }
 .decision-actions label { display: inline-grid; gap: .35rem; }
 #load-older { margin: 1rem 0; }
+
+.hosted-simulation dl { display: grid; grid-template-columns: minmax(6rem, auto) 1fr; gap: .5rem 1rem; }
+.hosted-simulation dd { margin: 0; overflow-wrap: anywhere; }
+.hosted-simulation dt { color: var(--muted); }
+.hosted-link { display: grid; gap: .35rem; width: 100%; }
+.hosted-link input { width: 100%; box-sizing: border-box; }

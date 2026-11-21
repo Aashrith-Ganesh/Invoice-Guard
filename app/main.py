@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 
 from app.api import agent_routes, document_routes
-from app.api.v1 import approvals, documents, invoices, mcp_access, payments, webhooks
+from app.api.v1 import approvals, documents, invoices, mcp_access, payment_links, payments, webhooks
 from app.core.config import Settings
 from app.core.masking import install_account_masking
 from app.database.engine import make_engine
@@ -40,7 +40,7 @@ def create_app() -> FastAPI:
     application.state.translator = SarvamTranslator(key) if key else None
     application.include_router(agent_routes.router)
     application.include_router(document_routes.router)
-    for routes in (invoices, approvals, payments, webhooks, mcp_access, documents):
+    for routes in (invoices, approvals, payments, webhooks, mcp_access, payment_links, documents):
         application.include_router(routes.router, prefix="/api/v1")
 
     @application.exception_handler(RequestValidationError)

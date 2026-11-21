@@ -186,3 +186,21 @@ The local stdio MCP server exposes tenant-scoped invoice and simulated payment
 reads plus a non-persisting validation preview. It uses a dedicated `mcp` bearer
 role. See the [architecture and setup](docs/architecture/mcp-architecture.md) and
 [Codex example](mcp/codex-config.example.toml).
+
+### Hosted simulation links
+
+Open a processed invoice as an owner, review its payment terms, then confirm
+the owner approval. Choose **Create simulation link** and use **Copy link**
+or **Open link**. The hosted page displays the approved invoice and offers
+**Simulate Payment**. A completed simulation displays its payment reference
+when reopened. Use a reachable HTTPS deployment for sharing off this machine.
+
+The link expires when its underlying approval expires. The URL fragment is
+a bearer capability, so share it only with the intended tester. Keep
+`CHECK_SIMULATOR_SECRET` set to a server-side secret. Rotating it invalidates
+existing links. Creation leaves cash and payment records unchanged. Clicking
+**Simulate Payment** rechecks approval and eligibility, then records one
+simulated payment and an audit event atomically. The page collects no payment
+details and makes no gateway requests.
+
+Run the hosted page tests with `npm test` in `frontend/`.

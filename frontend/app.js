@@ -593,13 +593,30 @@ function paymentPanel(doc) {
     class: "btn btn-ghost", type: "button", disabled: flow?.busy,
     onclick: () => paymentAction(doc, action),
   }, t(label));
+  if (flow?.hosted) {
+    const url = new URL(flow.hosted.path, location.origin).href;
+    const input = h("input", { type: "text", value: url, readonly: true });
+    panel.append(h("label", { class: "hosted-link" }, t("hostedLink"), input),
+      h("button", { class: "btn btn-ghost", type: "button", onclick: async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          toast(t("linkCopied"), "go");
+        } catch {
+          input.focus();
+          input.select();
+        }
+      } }, t("copyLink")),
+      h("a", { class: "btn btn-ghost", href: url, target: "_blank", rel: "noopener noreferrer" }, t("openLink")));
+  }
   if (doc.payment) {
     panel.append(h("p", { role: "status" }, `${t("simulationStatus")}: ${doc.payment.status}`),
       button("refreshPayment", "refresh"));
   } else if (state.workspace.role !== "owner") {
     panel.append(h("p", {}, t("ownerPayment")));
   } else if (flow?.approvalId) {
-    panel.append(button("startSimulation", "initiate"));
+    if (!flow.hosted) {
+      panel.append(button("createHostedLink", "link"), button("startSimulation", "initiate"));
+    }
   } else if (flow?.challenge) {
     const { amount, currency, bank_account_id } = flow.challenge;
     panel.append(h("p", {}, `${inr(amount, currency)} · ${t("verifiedBankId")} ${bank_account_id}`),
@@ -627,6 +644,10 @@ async function paymentAction(doc, action) {
       const result = await api("/approvals/confirm", { method: "POST", json: { token: flow.challenge.token } });
       flow.challenge = null;
       flow.approvalId = result.approval_id;
+    } else if (action === "link") {
+      flow.hosted = await api("/payments/links", { method: "POST", json: {
+        invoice_id: doc.invoice_id, approval_id: flow.approvalId,
+      } });
     } else {
       const payment = action === "refresh" ? await api(`/payments/${doc.payment.payment_id}`)
         : await api("/payments/initiate", { method: "POST", json: {

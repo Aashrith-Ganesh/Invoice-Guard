@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
   }
   return {
     base: "/app/",
+    build: { rolldownOptions: { input: { merchant: "index.html", payment: "pay.html" } } },
     server: {
       host: "127.0.0.1",
       proxy: { "/api": { target: DEV_API_TARGET || "http://127.0.0.1:8000" } },

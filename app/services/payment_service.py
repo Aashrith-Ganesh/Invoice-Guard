@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import reject
 from app.integrations.cashfree.simulator import TRANSITIONS, simulated_reference
-from app.models import Approval, AuditLog, Business, Payment
+from app.models import Approval, AuditLog, Business, Invoice, Payment
 from app.schemas.payment import InitiateRequest, PaymentView, SimulatorEvent
 from app.services.approval_service import approval_matches, ensure_attempt_allowed, latest_payment, require_eligible
 from app.services.invoice_service import current_validation_run, scoped_invoice
@@ -19,7 +19,22 @@ def payment_view(attempt: Payment) -> PaymentView:
     )
 
 
-def initiate(session: Session, business: Business, request: InitiateRequest) -> tuple[PaymentView, bool]:
+def approved_attempt(session: Session, business: Business, invoice_id: int, approval_id: int) -> tuple[Invoice, Approval]:
+    invoice = scoped_invoice(session, business.id, invoice_id)
+    approval = session.scalar(select(Approval).where(
+        Approval.business_id == business.id, Approval.id == approval_id,
+    ))
+    if (approval is None or approval.confirmed_at is None
+            or not approval_matches(approval, invoice, current_validation_run(session, invoice))):
+        raise reject(409, "APPROVAL_REQUIRED", "A current confirmed owner approval is required.")
+
+    ensure_attempt_allowed(latest_payment(session, invoice), approval.control_payment_id)
+    require_eligible(session, business, invoice)
+    return invoice, approval
+
+
+def initiate(session: Session, business: Business, request: InitiateRequest,
+             *, reference: str | None = None) -> tuple[PaymentView, bool]:
     existing = session.scalar(select(Payment).where(
         Payment.business_id == business.id, Payment.idempotency_key == request.idempotency_key,
     ))
@@ -28,21 +43,12 @@ def initiate(session: Session, business: Business, request: InitiateRequest) -> 
             raise reject(409, "IDEMPOTENCY_CONFLICT", "Key belongs to a different payment request.")
         return payment_view(existing), False
 
-    invoice = scoped_invoice(session, business.id, request.invoice_id)
-    approval = session.scalar(select(Approval).where(
-        Approval.business_id == business.id, Approval.id == request.approval_id,
-    ))
-    if (approval is None or approval.confirmed_at is None
-            or not approval_matches(approval, invoice, current_validation_run(session, invoice))):
-        raise reject(409, "APPROVAL_REQUIRED", "A current confirmed owner approval is required.")
-
-    ensure_attempt_allowed(latest_payment(session, invoice), approval.control_payment_id)
-    require_eligible(session, business, invoice)
+    invoice, approval = approved_attempt(session, business, request.invoice_id, request.approval_id)
     payment = Payment(
         business_id=business.id, invoice_id=invoice.id, approval_id=approval.id,
         bank_account_id=approval.bank_account_id, amount_minor=approval.amount_minor,
         currency=approval.currency, idempotency_key=request.idempotency_key,
-        external_reference=simulated_reference(), status="INITIATED",
+        external_reference=reference if reference is not None else simulated_reference(), status="INITIATED",
     )
     business.cash_minor -= payment.amount_minor
     session.add(payment)
