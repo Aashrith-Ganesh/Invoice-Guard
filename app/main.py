@@ -7,10 +7,12 @@ from starlette.exceptions import HTTPException
 
 from app.api.v1 import approvals, invoices, payments, webhooks
 from app.core.config import Settings
+from app.core.masking import install_account_masking
 from app.database.engine import make_engine
 
 
 def create_app() -> FastAPI:
+    install_account_masking()
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         yield
