@@ -50,6 +50,10 @@ migrations/        Alembic
 `POST payments/initiate`, `GET payments/{id}`, `POST webhooks/payout` (HMAC-signed), `GET /health`.
 Validation returns HTTP 200 with PASS/HOLD/BLOCK; 422 malformed, 401/403 auth, 404 scoped miss, 409 bad transition.
 
+## Decisions (agreed by the team)
+
+- A changed bank reference (`BANK_CHANGE`) is a **HOLD**, not a BLOCK. A same vendor/date/amount invoice with a different number (`POSSIBLE_DUPLICATE`) is a **HOLD**. HOLD still prevents approval and payout until an independent verification or revalidation clears it. Do not change these to BLOCK.
+
 ## Red lines
 
 Enforced in code **and** covered by tests. Never weaken, bypass or "temporarily" disable one. If a task needs to, stop and ask.
