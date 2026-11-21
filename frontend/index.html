@@ -68,8 +68,27 @@
       </div>
     </section>
 
+    <details id="upload-context" class="intake" hidden>
+      <summary data-t="uploadFacts"></summary>
+      <p class="muted" data-t="uploadFactsHint"></p>
+      <label><span data-t="acceptance"></span> <input type="date" id="acceptance-date"></label>
+      <label><span data-t="writtenAgreement"></span>
+        <select id="written-agreement">
+          <option value="" data-t="unknown"></option>
+          <option value="true" data-t="yes"></option>
+          <option value="false" data-t="no"></option>
+        </select>
+      </label>
+      <label id="bank-context"><span data-t="confirmedBank"></span>
+        <input id="confirmed-bank" type="text" maxlength="128" autocomplete="off" spellcheck="false">
+      </label>
+    </details>
+
     <ul class="pending" id="pending" aria-live="polite"></ul>
 
+    <label class="board-search"><span data-t="searchBills"></span>
+      <input type="search" id="search-bills" autocomplete="off">
+    </label>
     <main id="main" class="board">
       <section class="column" data-lane="ON_HOLD" aria-labelledby="col-hold">
         <header class="column-head">
@@ -87,6 +106,7 @@
       </section>
     </main>
 
+    <button type="button" class="btn btn-ghost" id="load-older" data-t="loadOlder" hidden></button>
     <details class="rejected" id="rejected" hidden>
       <summary><span data-t="rejected"></span> <span class="count" id="count-REJECTED"></span></summary>
       <ol class="cards" id="cards-REJECTED"></ol>

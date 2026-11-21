@@ -1,9 +1,10 @@
 import { UI, CHECK_NAMES } from "./i18n.js";
 
-const API = "/api/v1";
+const API = `${(import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "")}/api/v1`;
+const PAGE_SIZE = 50;
+const documentPage = (cursor = null) => `/documents?limit=${PAGE_SIZE}${cursor ? `&before_id=${cursor}` : ""}`;
 const LANES = ["ON_HOLD", "PROCESSED", "REJECTED"];
 const LANE_LABEL = { ON_HOLD: "onHold", PROCESSED: "processed", REJECTED: "rejected" };
-const STAGES = ["stageUpload", "stageRead", "stageCheck", "stageRate"];
 const MAX_BYTES = 10 * 1024 * 1024;
 
 const store = {
@@ -11,8 +12,13 @@ const store = {
   set(key, value) { try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch { /* private mode */ } },
 };
 
+// Remove the legacy persisted credential. Bearers now live only in this tab's memory.
+store.set("ph.key", null);
 const state = {
-  key: store.get("ph.key"),
+  key: null,
+  session: new AbortController(),
+  olderCursor: null,
+  payments: new Map(),
   lang: store.get("ph.lang", "en"),
   workspace: null,
   docs: [],
@@ -57,7 +63,6 @@ const timeFmt = (iso) => new Intl.DateTimeFormat(`${state.lang}-IN`, {
   day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
 }).format(new Date(iso));
 const vendorName = (doc) => doc.invoice.trade_name || doc.invoice.vendor_name || doc.filename;
-const isNarrow = () => matchMedia("(max-width: 860px)").matches;
 
 /* ---------- API ---------- */
 class ApiError extends Error {
@@ -65,18 +70,22 @@ class ApiError extends Error {
 }
 
 async function api(path, { method = "GET", json, body, raw = false } = {}) {
+  const { signal } = state.session;
   const headers = { Authorization: `Bearer ${state.key}` };
   if (json !== undefined) headers["Content-Type"] = "application/json";
   let response;
   try {
-    response = await fetch(API + path, { method, headers, body: json !== undefined ? JSON.stringify(json) : body });
+    response = await fetch(API + path, {
+      method, headers, signal, redirect: "error", cache: "no-store",
+      body: json !== undefined ? JSON.stringify(json) : body,
+    });
   } catch {
     throw new ApiError(0, "NETWORK", t("gone"));
   }
   if (!response.ok) {
     let error = {};
     try { error = (await response.json()).error || {}; } catch { /* not json */ }
-    if (response.status === 401 && path !== "/workspace") disconnect(true);
+    if (response.status === 401 && !signal.aborted && state.workspace) disconnect(true);
     throw new ApiError(response.status, error.code || "HTTP_ERROR", error.message || response.statusText);
   }
   return raw ? response : response.json();
@@ -111,24 +120,54 @@ applyTheme(store.get("ph.theme"));
 /* ---------- Connect ---------- */
 async function connect(key) {
   state.key = key;
+  let workspace, docs;
   try {
-    state.workspace = await api("/workspace");
+    [workspace, docs] = await Promise.all([api("/workspace"), api(documentPage())]);
   } catch (error) {
     state.key = null;
     throw error;
   }
-  store.set("ph.key", key);
+  Object.assign(state, { workspace, docs, olderCursor: docs.length === PAGE_SIZE ? docs.at(-1).document_id : null });
+  $("#key-input").value = "";
   $("#connect").hidden = true;
   $("#shell").hidden = false;
-  $("#brand-name").textContent = state.workspace.business_name;
-  $("#cash").textContent = inr(state.workspace.cash_available, state.workspace.currency);
-  state.docs = await api("/documents");
+  $("#brand-name").textContent = workspace.business_name;
+  $("#cash").textContent = inr(workspace.cash_available, workspace.currency);
+  $("#upload-context").hidden = workspace.extraction_mode !== "sarvam";
+  $("#bank-context").hidden = workspace.role !== "owner";
+  $("#sample-btn").hidden = workspace.extraction_mode !== "demo";
+  $("#file-input").multiple = workspace.extraction_mode === "demo";
   renderAll();
 }
 
+async function loadOlder() {
+  const button = $("#load-older");
+  button.disabled = true;
+  try {
+    const docs = await api(documentPage(state.olderCursor));
+    const seen = new Set(state.docs.map((doc) => doc.document_id));
+    state.docs.push(...docs.filter((doc) => !seen.has(doc.document_id)));
+    state.olderCursor = docs.length === PAGE_SIZE ? docs.at(-1).document_id : null;
+    renderAll();
+  } catch (error) {
+    toast(error.message, "stop");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function disconnect(expired = false) {
-  store.set("ph.key", null);
-  Object.assign(state, { key: null, workspace: null, docs: [], selected: null });
+  state.session.abort();
+  Object.assign(state, { key: null, workspace: null, docs: [], pending: [], selected: null,
+    samples: null, olderCursor: null, session: new AbortController() });
+  state.payments.clear();
+  state.translations.clear();
+  if ($("#review-dialog").open) $("#review-dialog").close();
+  reviewing = null;
+  $("#search-bills").value = "";
+  $("#acceptance-date").value = "";
+  $("#written-agreement").value = "";
+  $("#confirmed-bank").value = "";
   state.details.clear();
   for (const url of state.pdfUrls.values()) URL.revokeObjectURL(url);
   state.pdfUrls.clear();
@@ -144,6 +183,7 @@ function disconnect(expired = false) {
 
 /* ---------- Board ---------- */
 function renderAll() {
+  $("#load-older").hidden = state.olderCursor === null;
   renderPending();
   renderBoard();
   if (state.selected) renderDetail();
@@ -176,8 +216,12 @@ function card(doc) {
 }
 
 function renderBoard() {
+  const query = $("#search-bills").value.trim().toLocaleLowerCase();
+  const visible = state.docs.filter((doc) => !query ||
+    [vendorName(doc), doc.invoice.invoice_number, doc.filename].some((value) =>
+      value?.toLocaleLowerCase().includes(query)));
   for (const lane of LANES) {
-    const docs = state.docs.filter((doc) => doc.lane === lane);
+    const docs = visible.filter((doc) => doc.lane === lane);
     const sum = docs.reduce((acc, doc) => acc + Number(doc.invoice.grand_total || 0), 0);
     $(`#count-${lane}`).textContent = docs.length;
     const total = $(`#sum-${lane}`);
@@ -193,9 +237,7 @@ function renderPending() {
   $("#pending").replaceChildren(...state.pending.map((item) => h("li", {},
     h("span", { class: "name" }, item.name),
     item.failed ? h("span", { class: "failed" }, item.failed)
-      : h("span", { class: "stages" }, STAGES.map((stage, index) => h("span", {
-        class: `stage ${index < item.stage ? "done" : index === item.stage ? "on" : ""}`,
-      }, t(stage)))))));
+      : h("span", { class: "stages" }, h("span", { class: "stage on" }, t("processingUpload"))))));
 }
 
 /* ---------- Drawer ---------- */
@@ -254,8 +296,7 @@ function decisionPanel(doc) {
       h("h3", {}, t("readyTitle")),
       h("p", {}, t("readyBody")),
       doc.review.status === "VERIFIED" && doc.review.note ? h("p", { class: "note" }, `${t("reviewedBy")}: ${doc.review.note}`) : null,
-      h("div", { class: "decision-actions" },
-        h("button", { class: "btn btn-go", type: "button", onclick: () => handOff(doc) }, t("pay"))));
+      paymentPanel(doc));
   }
   const panel = h("section", { class: `decision ${doc.lane}` },
     h("h3", {}, doc.lane === "REJECTED" ? t("rejected") : t("whyHold")),
@@ -265,9 +306,19 @@ function decisionPanel(doc) {
     return panel;
   }
   const actions = h("div", { class: "decision-actions" });
-  if (doc.can_verify) actions.append(h("button", { class: "btn btn-tape", type: "button", onclick: () => openReview(doc, "verify") }, t("verify")));
-  if (doc.can_recheck) actions.append(h("button", { class: "btn btn-ghost", type: "button", onclick: (e) => recheck(doc, e.currentTarget) }, t("recheck")));
-  if (doc.can_reject) actions.append(h("button", { class: "btn btn-stop", type: "button", onclick: () => openReview(doc, "reject") }, t("reject")));
+  if (doc.can_verify && state.workspace.role === "owner") actions.append(h("button", { class: "btn btn-tape", type: "button", onclick: () => openReview(doc, "verify") }, t("verify")));
+  if (doc.can_recheck) {
+    const needsBank = doc.decision?.results.some((item) =>
+      ["BANK_CHANGE", "BANK_CHANGED", "BANK_UNVERIFIED"].includes(item.code) ||
+      (item.code === "MISSING_FIELDS" && item.fields.includes("bank_reference")));
+    const bank = needsBank && state.workspace.role === "owner"
+      ? h("input", { type: "text", maxlength: 128, autocomplete: "off", "aria-label": t("confirmedBank") })
+      : null;
+    if (bank) actions.append(h("label", {}, t("confirmedBank"), bank));
+    actions.append(h("button", { class: "btn btn-ghost", type: "button",
+      onclick: (e) => recheck(doc, e.currentTarget, bank?.value.trim()) }, t("recheck")));
+  }
+  if (doc.can_reject && state.workspace.role === "owner") actions.append(h("button", { class: "btn btn-stop", type: "button", onclick: () => openReview(doc, "reject") }, t("reject")));
   panel.append(actions);
   if (!doc.can_verify) panel.append(h("p", { class: "hint" }, t("ruleLocked")));
   return panel;
@@ -413,6 +464,10 @@ function move(step) {
 
 /* ---------- Upload ---------- */
 function uploadFiles(files) {
+  if (state.workspace.extraction_mode === "sarvam" && files.length > 1) {
+    toast(t("oneLiveFile"), "stop");
+    return;
+  }
   for (const file of [...files]) {
     if (!(file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"))) { toast(`${file.name} ${t("notPdf")}`, "stop"); continue; }
     if (file.size > MAX_BYTES) { toast(`${file.name} ${t("tooBig")}`, "stop"); continue; }
@@ -421,27 +476,33 @@ function uploadFiles(files) {
 }
 
 async function uploadOne(file) {
-  const item = { name: file.name, stage: 0, failed: null };
+  const session = state.session;
+  const item = { name: file.name, failed: null };
   state.pending.unshift(item);
   renderPending();
-  const timer = setInterval(() => { if (item.stage < STAGES.length - 1) { item.stage += 1; renderPending(); } }, 520);
   const form = new FormData();
   form.append("file", file, file.name);
+  if (state.workspace.extraction_mode === "sarvam") {
+    for (const [field, selector] of Object.entries({
+      acceptance_date: "#acceptance-date", written_agreement: "#written-agreement",
+      confirmed_bank_reference: "#confirmed-bank",
+    })) {
+      if (field === "confirmed_bank_reference" && state.workspace.role !== "owner") continue;
+      const value = $(selector).value.trim();
+      if (value) form.append(field, value);
+      $(selector).value = "";
+    }
+  }
   try {
-    const started = performance.now();
     const doc = await api("/documents", { method: "POST", body: form });
-    await new Promise((resolve) => setTimeout(resolve, Math.max(0, 1500 - (performance.now() - started))));
-    clearInterval(timer);
-    item.stage = STAGES.length;
-    renderPending();
-    await new Promise((resolve) => setTimeout(resolve, 250));
     state.pending = state.pending.filter((p) => p !== item);
+    if (session.signal.aborted) return;
     replaceDoc(doc);
     renderAll();
     toast(`${vendorName(doc)}: ${t(LANE_LABEL[doc.lane])}`, doc.lane === "PROCESSED" ? "go" : "");
     document.querySelector(`.card[data-id="${doc.document_id}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   } catch (error) {
-    clearInterval(timer);
+    if (session.signal.aborted) return;
     item.failed = `${t("failed")}: ${error.message}`;
     renderPending();
     setTimeout(() => { state.pending = state.pending.filter((p) => p !== item); renderPending(); }, 6000);
@@ -459,8 +520,10 @@ async function toggleSampleMenu() {
       onclick: async () => {
         menu.hidden = true;
         button.setAttribute("aria-expanded", "false");
-        const blob = await (await api(`/samples/${sample.name}`, { raw: true })).blob();
-        uploadOne(new File([blob], `${sample.name}.pdf`, { type: "application/pdf" }));
+        try {
+          const blob = await (await api(`/samples/${encodeURIComponent(sample.name)}`, { raw: true })).blob();
+          if (state.workspace) uploadOne(new File([blob], `${sample.name}.pdf`, { type: "application/pdf" }));
+        } catch (error) { toast(error.message, "stop"); }
       },
     }, h("strong", {}, sample.title, h("span", { class: `status ${sample.expected}` }, t(LANE_LABEL[sample.expected]))),
     h("small", {}, sample.description))));
@@ -508,10 +571,11 @@ async function submitReview(event) {
   }
 }
 
-async function recheck(doc, button) {
+async function recheck(doc, button, bankReference) {
   button.disabled = true;
   try {
-    await api(`/invoices/${doc.invoice_id}/revalidate`, { method: "POST" });
+    await api(`/invoices/${doc.invoice_id}/revalidate`, { method: "POST",
+      json: bankReference ? { bank_reference: bankReference } : undefined });
     const updated = await api(`/documents/${doc.document_id}`);
     replaceDoc(updated);
     toast(updated.lane === "ON_HOLD" ? t("stillHold") : `${t("rechecked")}: ${t(LANE_LABEL[updated.lane])}`, updated.lane === "PROCESSED" ? "go" : "");
@@ -522,12 +586,67 @@ async function recheck(doc, button) {
   }
 }
 
-// Payment itself happens on the host (Cashfree). Tell the embedding page which invoice is ready.
-function handOff(doc) {
-  const message = { type: "payables:payment-ready", document_id: doc.document_id, invoice_id: doc.invoice_id };
-  if (window.parent !== window) window.parent.postMessage(message, document.referrer ? new URL(document.referrer).origin : "*");
-  window.dispatchEvent(new CustomEvent("payables:payment-ready", { detail: message }));
-  toast(t("payHanded"), "go");
+function paymentPanel(doc) {
+  const flow = state.payments.get(doc.invoice_id);
+  const panel = h("div", { class: "decision-actions" });
+  const button = (label, action) => h("button", {
+    class: "btn btn-ghost", type: "button", disabled: flow?.busy,
+    onclick: () => paymentAction(doc, action),
+  }, t(label));
+  if (doc.payment) {
+    panel.append(h("p", { role: "status" }, `${t("simulationStatus")}: ${doc.payment.status}`),
+      button("refreshPayment", "refresh"));
+  } else if (state.workspace.role !== "owner") {
+    panel.append(h("p", {}, t("ownerPayment")));
+  } else if (flow?.approvalId) {
+    panel.append(button("startSimulation", "initiate"));
+  } else if (flow?.challenge) {
+    const { amount, currency, bank_account_id } = flow.challenge;
+    panel.append(h("p", {}, `${inr(amount, currency)} · ${t("verifiedBankId")} ${bank_account_id}`),
+      button("confirmPayment", "confirm"));
+  } else {
+    panel.append(button("reviewPayment", "issue"));
+  }
+  return panel;
+}
+
+async function paymentAction(doc, action) {
+  let flow = state.payments.get(doc.invoice_id);
+  if (!flow) {
+    flow = { key: crypto.randomUUID(), busy: false };
+    state.payments.set(doc.invoice_id, flow);
+  }
+  if (flow.busy) return;
+  const session = state.session;
+  flow.busy = true;
+  renderDetail();
+  try {
+    if (action === "issue") {
+      flow.challenge = await api("/approvals", { method: "POST", json: { invoice_id: doc.invoice_id } });
+    } else if (action === "confirm") {
+      const result = await api("/approvals/confirm", { method: "POST", json: { token: flow.challenge.token } });
+      flow.challenge = null;
+      flow.approvalId = result.approval_id;
+    } else {
+      const payment = action === "refresh" ? await api(`/payments/${doc.payment.payment_id}`)
+        : await api("/payments/initiate", { method: "POST", json: {
+          invoice_id: doc.invoice_id, approval_id: flow.approvalId, idempotency_key: flow.key,
+        } });
+      if (session.signal.aborted) return;
+      replaceDoc({ ...doc, payment });
+      const workspace = await api("/workspace");
+      $("#cash").textContent = inr(workspace.cash_available, workspace.currency);
+    }
+  } catch (error) {
+    if (["STALE_APPROVAL", "INVALID_APPROVAL", "APPROVAL_REQUIRED"].includes(error.code)) {
+      flow.challenge = null;
+      flow.approvalId = null;
+    }
+    if (!session.signal.aborted) toast(error.message, "stop");
+  } finally {
+    flow.busy = false;
+    if (!session.signal.aborted && state.selected === doc.document_id) renderDetail();
+  }
 }
 
 /* ---------- Events ---------- */
@@ -537,10 +656,12 @@ function bind() {
     const key = $("#key-input").value.trim();
     const error = $("#connect-error");
     if (!key) return;
+    const submit = event.submitter || $("#connect-form button[type=submit]");
+    submit.disabled = true;
     try { await connect(key); error.hidden = true; } catch (err) {
       error.textContent = err.status === 401 ? t("badKey") : err.message;
       error.hidden = false;
-    }
+    } finally { submit.disabled = false; }
   });
   document.querySelectorAll("[data-lang]").forEach((chip) => chip.addEventListener("click", () => setLanguage(chip.dataset.lang)));
   $("#ui-lang").addEventListener("change", (e) => { state.readLang = null; setLanguage(e.target.value); });
@@ -553,6 +674,8 @@ function bind() {
   });
   $("#disconnect-btn").addEventListener("click", () => disconnect());
   $("#file-input").addEventListener("change", (e) => { uploadFiles(e.target.files); e.target.value = ""; });
+  $("#search-bills").addEventListener("input", renderBoard);
+  $("#load-older").addEventListener("click", loadOlder);
   $("#sample-btn").addEventListener("click", toggleSampleMenu);
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".menu-wrap")) { $("#sample-menu").hidden = true; $("#sample-btn").setAttribute("aria-expanded", "false"); }
@@ -583,16 +706,12 @@ function bind() {
     if (e.key === "j") { e.preventDefault(); move(1); }
     else if (e.key === "k") { e.preventDefault(); move(-1); }
     else if (e.key === "u") { e.preventDefault(); $("#file-input").click(); }
-    else if (e.key === "v" && doc?.can_verify) { e.preventDefault(); openReview(doc, "verify"); }
-    else if (e.key === "x" && doc?.can_reject) { e.preventDefault(); openReview(doc, "reject"); }
+    else if (e.key === "v" && doc?.can_verify && state.workspace.role === "owner") { e.preventDefault(); openReview(doc, "verify"); }
+    else if (e.key === "x" && doc?.can_reject && state.workspace.role === "owner") { e.preventDefault(); openReview(doc, "reject"); }
   });
 }
 
 bind();
 applyLanguage();
-if (state.key) {
-  connect(state.key).catch(() => disconnect(true));
-} else {
-  $("#connect").hidden = false;
-  $("#key-input").focus();
-}
+$("#connect").hidden = false;
+$("#key-input").focus();

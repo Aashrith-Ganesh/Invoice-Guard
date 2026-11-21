@@ -42,3 +42,11 @@ The repository includes a stdio MCP server for tenant-scoped invoice and simulat
 payment reads and non-persisting validation. See the [MCP architecture](architecture/mcp-architecture.md)
 and [Codex example](../mcp/codex-config.example.toml). The hosted Cashfree MCP and
 its merchant OAuth remain separate.
+
+## Merchant frontend
+
+The original vanilla JavaScript merchant app is built with npm and Vite.
+Development uses an API proxy and the production bundle is served by FastAPI.
+The UI uses the document, review, translation, owner approval and simulator
+status endpoints, with a memory-only browser session. The merchant extraction
+mode can use the shared Sarvam REST job client. See [deployment](DEPLOYMENT.md).

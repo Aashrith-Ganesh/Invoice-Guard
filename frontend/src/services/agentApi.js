@@ -1,7 +1,7 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+const apiOrigin = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
-export async function runAgent({ agentId, sessionId, input, history = [] }, request = fetch) {
-  const response = await request(`${API_BASE_URL}/api/v1/agent-runs`, {
+export async function runAgent({ agentId, sessionId, input, history = [] }, authenticatedFetch) {
+  const response = await authenticatedFetch(`${apiOrigin}/api/v1/agent-runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -13,9 +13,8 @@ export async function runAgent({ agentId, sessionId, input, history = [] }, requ
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(`Agent request failed (${response.status}): ${message}`);
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.error?.message || `Agent request failed (${response.status})`);
   }
-
   return response.json();
 }

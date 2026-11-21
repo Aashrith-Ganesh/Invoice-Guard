@@ -15,6 +15,7 @@ class Extraction:
     invoice: dict | None  # fields of `ExtractedInvoice`, exactly as the extractor produced them
     display: dict = field(default_factory=dict)  # human-facing extras: descriptions, language, handwriting
     error: str | None = None
+    provider_result: dict | None = None
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from app.schemas.payment import PaymentView
 from app.schemas.validation import Decision
 
 Lane = Literal["PROCESSED", "ON_HOLD", "REJECTED"]
@@ -54,6 +55,7 @@ class DocumentView(BaseModel):
     can_reject: bool
     can_recheck: bool
     payment_ready: bool
+    payment: PaymentView | None = None
     invoice: dict
     decision: Decision | None
     events: list[Event] = []
@@ -87,6 +89,7 @@ class Workspace(BaseModel):
     role: str
     threshold: int
     translation_provider: str
+    extraction_mode: Literal["demo", "sarvam"]
     languages: dict[str, str]
 
 

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
@@ -16,7 +17,7 @@ from app.integrations.sarvam.extractor import DemoExtractor
 from app.integrations.sarvam.prism import HeuristicPrism
 from app.integrations.sarvam.translate import SarvamTranslator
 
-FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
+FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 
 def create_app() -> FastAPI:
@@ -28,6 +29,10 @@ def create_app() -> FastAPI:
 
     application = FastAPI(title="Accounts Payable Check Service", lifespan=lifespan)
     application.state.settings = Settings.from_env()
+    if application.state.settings.cors_origins:
+        application.add_middleware(CORSMiddleware, allow_origins=application.state.settings.cors_origins,
+                                   allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
+    application.state.document_extractor_mode = application.state.settings.document_extractor_mode
     application.state.engine = make_engine(application.state.settings.database_url)
     application.state.extractor = DemoExtractor()
     application.state.rater = HeuristicPrism()
@@ -56,7 +61,7 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    if FRONTEND.is_dir():
+    if (FRONTEND / "index.html").is_file():
         application.mount("/app", StaticFiles(directory=FRONTEND, html=True), name="frontend")
 
         @application.get("/", include_in_schema=False)

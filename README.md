@@ -37,14 +37,41 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 In a second terminal, run `.venv/bin/python -m scripts.demo` against the freshly seeded server. It exercises a valid invoice, a duplicate invoice, invalid arithmetic, a changed bank account, an unknown vendor, a written-amount mismatch and denied approval, and a repeated payment request followed by signed simulated settlement. Run `.venv/bin/python -m pytest -q` for the tests. The seeder creates one business, ten fictional vendors, and three account records per vendor.
 
-## Merchant app
+## Merchant frontend
 
-With the server running, open http://127.0.0.1:8000/ and paste `CHECK_DEMO_OWNER_KEY` from `.env`. Upload invoice PDFs
-(or use **Try a sample**). Each upload is read, checked against the rules and rated by Prism. Invoices with passing rules
-and a rating of 80 or more are **Processed** and ready for payment in Cashfree; everything else is **On hold** for a person
-to verify or reject. Any invoice can be read in English, Tamil or Hindi offline, or any Sarvam language when
-`SARVAM_API_KEY` is set. Offline, extraction reads a payload embedded in the synthetic sample PDFs and the Prism rating is a
-heuristic stand-in. Real PDFs without that payload land on hold as unreadable until the live Sarvam adapter is added.
+The existing vanilla JavaScript merchant UI uses Vite for development and production builds.
+Install Node.js 20.19+ or 22.12+ and npm. With FastAPI running on port 8000, start
+the development frontend from a second terminal:
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+Open `http://127.0.0.1:5173/app/`. Vite proxies `/api` to FastAPI. Set
+`DEV_API_TARGET` in `frontend/.env` to use a different local backend origin.
+
+For a production build, run `npm run lint`, `npm run typecheck`, and
+`npm run build` from `frontend/`. The build emits `frontend/dist/`.
+Start or restart FastAPI from the repository root with
+`uvicorn app.main:app --host 127.0.0.1 --port 8000` and open
+`http://127.0.0.1:8000/app/`. FastAPI serves only the built frontend directory.
+
+Connect with a key from the server’s `CHECK_BEARER_KEYS` configuration. Service
+and owner keys can read and upload bills. The owner can review held bills,
+approve eligible bills, and initiate a simulated payment. The UI displays the
+stored status and lets the owner refresh after a signed simulator event. The
+browser session keeps the access key in memory and requires reconnection after
+a reload. Use the separate MCP credential only with the MCP server.
+
+Demo mode includes the existing synthetic sample PDFs. Set
+`CHECK_DOCUMENT_EXTRACTOR=sarvam` and provide `SARVAM_API_KEY` on the server to
+extract uploaded PDFs via Sarvam. Provide the independently recorded acceptance
+date and agreement status before upload. An owner can include an independently
+verified opaque bank reference. The validator can hold incomplete invoices.
+Prism scoring uses the local heuristic. Live Cashfree payouts remain outside
+this application. See [deployment instructions](docs/DEPLOYMENT.md).
 
 ## API
 

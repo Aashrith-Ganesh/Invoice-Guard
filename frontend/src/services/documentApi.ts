@@ -9,14 +9,14 @@ export type InvoiceResult = InvoiceJob & {
 };
 
 export function createSarvamClient(
-  base = "/api/agents/sarvam",
-  request: typeof fetch = fetch,
+  request: typeof fetch,
+  base = `${(import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "")}/api/agents/sarvam`,
 ) {
   async function send<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await request(`${base}${path}`, init);
     if (!response.ok) {
       const body = await response.json().catch(() => null);
-      const detail = typeof body?.detail === "string" ? body.detail : null;
+      const detail = typeof body?.error?.message === "string" ? body.error.message : null;
       throw new Error(detail ?? `Sarvam request failed (${response.status})`);
     }
     return response.json() as Promise<T>;

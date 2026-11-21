@@ -8,14 +8,16 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import reject
 from app.database.base import utc_now
-from app.integrations.sarvam.types import Extraction, Extractor, Rater, Translator
+from app.integrations.sarvam.types import Extraction, Rater, Translator
 from app.models import AuditLog, Business, Document, Invoice, Vendor
 from app.schemas.document import (
     DocumentView, Event, RatingView, Reason, ReviewView, SignalView, TranslationView,
 )
 from app.schemas.invoice import ExtractedInvoice
 from app.schemas.validation import Decision
+from app.services.approval_service import latest_payment
 from app.services.invoice_service import evaluate
+from app.services.payment_service import payment_view
 from app.services.plain_language import ITEMS, REASONS, SUMMARY, reason_key
 from app.services.review_policy import THRESHOLD, lane
 from app.services.view_service import invoice_view
@@ -38,14 +40,17 @@ def scoped_document(session: Session, business_id: int, document_id: int) -> Doc
     return document
 
 
-def upload(session: Session, business: Business, filename: str | None, content: bytes,
-           extractor: Extractor, rater: Rater) -> Document:
+def validate_upload(content: bytes) -> None:
     if len(content) > MAX_BYTES:
         raise reject(413, "FILE_TOO_LARGE", "PDF must be 10 MB or smaller.")
     if not content.startswith(b"%PDF-"):
         raise reject(415, "PDF_REQUIRED", "Upload a PDF invoice.")
+
+
+
+def upload(session: Session, business: Business, filename: str | None, content: bytes,
+           extraction: Extraction, rater: Rater) -> Document:
     digest = sha256(content).hexdigest()
-    extraction = extractor.extract(content, filename or "")
     decision: Decision | None = None
     invoice_fields = None
     error = extraction.error
@@ -60,14 +65,14 @@ def upload(session: Session, business: Business, filename: str | None, content: 
             newest = session.scalar(select(func.max(Invoice.id)).where(Invoice.business_id == business.id)) or 0
             decision = evaluate(session, business, data, invoice_fields)
             duplicate_submission = decision.invoice_id <= newest
-    if decision is None:
-        extraction = Extraction(extraction.provider, None, extraction.display, error)
-    rating = rater.rate(extraction, decision)
+    rating_input = extraction if decision else Extraction(extraction.provider, None, extraction.display, error)
+    rating = rater.rate(rating_input, decision)
     document = Document(
         business_id=business.id, invoice_id=decision.invoice_id if decision else None,
         duplicate_submission=bool(decision and duplicate_submission), filename=safe_filename(filename),
         sha256=digest, size_bytes=len(content), content=content, extractor=extraction.provider,
         extraction={"invoice": invoice_fields, "display": extraction.display, "error": error,
+                    "provider_result": extraction.provider_result,
                     "decision_at_upload": decision.model_dump(mode="json") if decision else None},
         rating_provider=rating.provider, rating_score=rating.score,
         rating_signals=[signal.__dict__ for signal in rating.signals],
@@ -181,6 +186,9 @@ def view(session: Session, business: Business, document: Document, *, with_event
     current = lane(document, rule_status)
     revalidatable = bool(decision and not document.duplicate_submission and rule_status == "HOLD"
                          and any(check.code == "DUPLICATE_SCAN" for check in decision.results))
+    payment = None
+    if document.invoice_id is not None and not document.duplicate_submission:
+        payment = latest_payment(session, session.get(Invoice, document.invoice_id))
     return DocumentView(
         document_id=document.id, invoice_id=document.invoice_id, filename=document.filename,
         uploaded_at=document.created_at, size_bytes=document.size_bytes, extractor=document.extractor,
@@ -193,6 +201,7 @@ def view(session: Session, business: Business, document: Document, *, with_event
         can_reject=current == "ON_HOLD",
         can_recheck=current == "ON_HOLD" and revalidatable,
         payment_ready=current == "PROCESSED",
+        payment=payment_view(payment) if payment else None,
         invoice=invoice_summary(session, document, decision), decision=decision,
         events=events_for(session, document) if with_events else [],
     )
