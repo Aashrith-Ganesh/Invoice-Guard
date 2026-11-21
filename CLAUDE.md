@@ -68,7 +68,7 @@ Test map: RL1 `test_invoices`/`test_payments`/`test_red_lines`; RL2 `test_paymen
 2. **Prism signals:** `app/integrations/sarvam/` is empty. Same-vendor-despite-spelling, disguised duplicate, amount-in-words via `client.decisions.create` (model `sarvam-prism`, `sarvamai>=0.1.43`). Prism may raise a HOLD, never clear a BLOCK.
 3. **Weekly batch + one-time code:** no batch endpoint, no code bound to `batch_id` + total. Today approval is per invoice.
 4. **Real Cashfree sandbox payouts:** payouts are simulated (`integrations/cashfree/simulator.py`). Replace behind the same interface; keep sandbox-only.
-5. **Spec divergences to decide, not silently change:** bank-reference change is HOLD (`BANK_CHANGE`) but the spec says BLOCK; a same vendor+date+amount duplicate with a different invoice number is HOLD but the spec says BLOCK within 90 days; no bank name-match check from Secure ID; Udyam deadline logic exists but there is no "stop at available cash" batch selection.
+5. **Remaining spec gaps:** no bank name-match check from Secure ID; Udyam deadline logic exists but there is no "stop at available cash" batch selection.
 6. `GET /files/{name}` for synthetic invoice images is not built.
 7. Tamil text is produced downstream (Relay); this service returns English `failure_reasons` plus stable `risk_indicators` codes.
 

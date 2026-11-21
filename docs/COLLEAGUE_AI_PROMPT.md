@@ -33,7 +33,10 @@ If your task seems to require crossing one of these, stop and ask the human. LLM
 3. Weekly batch: endpoint returning the prioritised batch within available cash, plus a one-time code bound to `batch_id` + total, single use, expiring. It must feed the existing approval and payment path, not bypass it.
 4. Real Cashfree sandbox payouts behind the existing simulator interface (`transfer_id` / idempotency from the invoice or attempt, signature-verified webhooks).
 5. `GET /files/{name}` serving synthetic invoice images.
-6. Decide with the human: bank-reference change is currently HOLD (spec: BLOCK) and a same vendor/date/amount duplicate with a different number is HOLD (spec: BLOCK within 90 days).
+
+
+## Agreed decisions
+- A changed bank reference is a HOLD (`BANK_CHANGE`), and a same vendor/date/amount duplicate with a different invoice number is a HOLD (`POSSIBLE_DUPLICATE`). Both stay HOLD; HOLD blocks approval and payout until cleared. Do not change them to BLOCK.
 
 ## Report back with
 What you changed, the test output, which red lines are affected (or "none"), and anything you were unsure about.
