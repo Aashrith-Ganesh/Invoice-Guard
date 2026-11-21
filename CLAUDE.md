@@ -21,7 +21,7 @@ to the owner in Tamil.
 ## Architecture
 
 The planned Cashfree Relay deployment lives in the Cashfree dashboard. Its four workflows call this service over HTTP:
-1. **Invoice Intake:** webhook → Sarvam Extract → validate → router (BLOCK/HOLD → Tamil WhatsApp + Sheets; PASS → bank verification → Sheets)
+1. **Invoice Intake:** upload → this service (Sarvam Extract → map → validate) → POST decision event (EN + Tamil summary, no bank data) to the Relay inbound webhook → router (BLOCK/HOLD → Tamil WhatsApp + Sheets; PASS → bank verification → Sheets). Relay's Sarvam File field cannot take a URL, so extraction runs here (`app/integrations/relay/intake.py`; tests fake it via the autouse `relay_events` fixture).
 2. **Weekly Payment Run:** Friday schedule → priorities → Tamil voice call with batch summary + one-time code → WhatsApp fallback
 3. **Approval → Payout:** called only after the approval is confirmed → payout (`idempotency_key` per attempt) → Sheets
 4. **Payout Status:** payout webhooks → status update → router (failed/reversed → unpaid + alert, no auto-retry)

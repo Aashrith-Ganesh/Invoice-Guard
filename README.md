@@ -102,7 +102,7 @@ List agents with `GET /api/v1/agent-runs`. POST to the same path with
 The vendor tool reads the authenticated business's vendor records. Chat output
 is advisory. Payment validation, approval and initiation use the existing APIs.
 
-Upload a synthetic PDF as multipart field `file` to `POST /api/agents/sarvam/invoices`.
+Upload a synthetic PDF, PNG or JPEG as multipart field `file` to `POST /api/agents/sarvam/invoices`.
 Poll `GET /api/agents/sarvam/invoices/{job_id}` with a credential for the same business.
 Inspect the source and completed extraction before submitting a validation decision.
 A partial job can be inspected and must be completed before validation.
@@ -128,10 +128,30 @@ For display translation, POST `text`, `source_language` and `target_language`
 to `/api/agents/sarvam/translate`. The frontend helpers accept a fetch function
 from the host app for authenticated requests. Keep the provider key server-side.
 
-The PNG fixture in `tests/fixtures` is for the Relay intake rehearsal. To send
-its event, configure the isolated Relay test webhook and pass a reachable
-synthetic file URL to `python -m scripts.send_test_invoice --confirm-isolated-test --file-url URL`.
-The sender emits only the HTTP status after submission. See the [integration report](docs/PS3_INTEGRATION.md).
+### Invoice intake demo (Relay)
+
+Relay's Sarvam "Extract Document Data" step cannot take a file URL, so extraction runs here and Relay
+only routes the result. After `/validate` commits a decision, the service POSTs one flat event to the
+Relay "Invoice Intake" inbound webhook when `RELAY_INTAKE_WEBHOOK_URL` is set:
+`event`, `job_id`, `invoice_id`, `invoice_number`, `vendor_name`, `amount`, `currency`,
+`overall_status`, `payout_permitted`, `requires_owner_approval`, `risk_indicators`, `failure_reasons`,
+`summary_en` and `summary_ta` (Sarvam translation, blank if unavailable). It carries no bank details.
+Delivery is best-effort: it never changes the decision, the response header `X-Relay-Notified` reports
+it, and an audit event `relay_intake_notified` records it. In Relay: Inbound Webhook → Router on
+`overall_status` → WhatsApp (`summary_ta`) and Sheets.
+
+With the API running and `SARVAM_API_KEY` set, drive one invoice end to end with
+`python scripts/intake_invoice.py FILE` (uses `CHECK_DEMO_OWNER_KEY`). The fixtures in `tests/fixtures`
+are rendered by `scripts/make_test_invoice.py` (needs Pillow):
+
+| Fixture | Command | Expected |
+| --- | --- | --- |
+| `invoice_pass_002.png` | `... invoice_pass_002.png --confirm-bank-reference demo:vendor-3:current` | PASS, owner approval required |
+| `invoice_math_003.png` | `... invoice_math_003.png --confirm-bank-reference demo:vendor-3:current` | BLOCK `ARITHMETIC_SUBTOTAL` |
+| `invoice_test_001.png` | `... invoice_test_001.png` | BLOCK `UNKNOWN_VENDOR` (supplier not in the register) |
+
+Running the same invoice twice exercises duplicate detection. `scripts/send_test_invoice.py` posts a
+file-URL event and is kept for the earlier Relay trigger rehearsal. See the [integration report](docs/PS3_INTEGRATION.md).
 
 ## PS3 MCP server
 

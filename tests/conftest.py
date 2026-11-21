@@ -7,6 +7,21 @@ from app.main import create_app
 from scripts.seed import seed
 
 
+@pytest.fixture(autouse=True)
+def relay_events(monkeypatch):
+    """Record Relay intake events instead of posting them. .env may hold a live webhook URL."""
+    from app.api import document_routes
+
+    sent = []
+
+    async def record(event):
+        sent.append(event)
+        return True
+
+    monkeypatch.setattr(document_routes, "notify_intake", record)
+    return sent
+
+
 @pytest.fixture
 def api(tmp_path, monkeypatch):
     monkeypatch.setenv("CHECK_DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
