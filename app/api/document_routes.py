@@ -5,13 +5,14 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import Actor, Database
 from app.core.exceptions import reject
 from app.database.session import write_transaction
+from app.integrations.relay.intake import decision_event, notify_intake
 from app.integrations.sarvam.documents import sarvam_request
 from app.integrations.sarvam.invoice_mapping import InvoiceContext, map_invoice
 from app.models import AuditLog, Business
@@ -22,6 +23,13 @@ from app.services.invoice_service import evaluate
 router = APIRouter(prefix="/api/agents/sarvam", tags=["Sarvam"])
 MAX_FILE_BYTES = 10 * 1024 * 1024
 JOB_PATH = "/doc-ai/v1/job"
+TRANSLATE_MODEL = "sarvam-translate:v1"
+# Sarvam Extract accepts PDF, PNG and JPEG. Detect the type from the bytes, not the client's filename.
+DOCUMENT_TYPES = (
+    (b"%PDF-", "invoice.pdf", "application/pdf"),
+    (b"\x89PNG\r\n\x1a\n", "invoice.png", "image/png"),
+    (b"\xff\xd8\xff", "invoice.jpg", "image/jpeg"),
+)
 
 
 # Share the checked-in provider contract with Relay's extraction step.
@@ -40,13 +48,14 @@ class TranslationInput(BaseModel):
 async def submit_invoice(actor: Actor, engine: Database, file: Annotated[UploadFile, File()]):
     content = await file.read(MAX_FILE_BYTES + 1)
     if len(content) > MAX_FILE_BYTES:
-        raise HTTPException(413, "PDF must be 10 MiB or smaller.")
-    if not content.startswith(b"%PDF-"):
-        raise HTTPException(415, "Upload an invoice PDF.")
+        raise HTTPException(413, "Invoice file must be 10 MiB or smaller.")
+    kind = next(((name, mime) for magic, name, mime in DOCUMENT_TYPES if content.startswith(magic)), None)
+    if kind is None:
+        raise HTTPException(415, "Upload the invoice as a PDF, PNG or JPEG file.")
     job = await sarvam_request(
         "POST",
         f"{JOB_PATH}/extract",
-        files={"file": ("invoice.pdf", content, "application/pdf")},
+        files={"file": (kind[0], content, kind[1])},
         data={"schema": INVOICE_SCHEMA, "output_format": "json"},
     )
     try:
@@ -92,7 +101,8 @@ async def invoice_status(job_id: UUID, actor: Actor, engine: Database):
 
 
 @router.post("/invoices/{job_id}/validate")
-async def validate_extraction(job_id: UUID, context: InvoiceContext, actor: Actor, engine: Database) -> Decision:
+async def validate_extraction(job_id: UUID, context: InvoiceContext, actor: Actor, engine: Database,
+                              response: Response) -> Decision:
     if context.confirmed_bank_reference is not None and actor.role != "owner":
         raise reject(403, "OWNER_REQUIRED", "An owner must confirm the independently checked bank reference.")
     with Session(engine) as session:
@@ -114,7 +124,31 @@ async def validate_extraction(job_id: UUID, context: InvoiceContext, actor: Acto
             details={"job_id": str(job_id), "actor": actor.subject,
                      "bank_confirmation_supplied": context.confirmed_bank_reference is not None},
         ))
-        return decision
+
+    # The decision is committed. Telling Relay is best-effort and can never change it.
+    event = decision_event(job_id, decision, mapped)
+    event["summary_ta"] = await tamil_or_blank(event["summary_en"])
+    delivered = await notify_intake(event)
+    with write_transaction(engine) as session:
+        session.add(AuditLog(business_id=actor.business_id, action="relay_intake_notified",
+                             entity_id=decision.invoice_id, details={"job_id": str(job_id), "delivered": delivered}))
+    response.headers["X-Relay-Notified"] = "true" if delivered else "false"
+    return decision
+
+
+def translation_body(text: str, source_language: str, target_language: str) -> dict:
+    return {"input": text, "source_language_code": source_language,
+            "target_language_code": target_language, "model": TRANSLATE_MODEL}
+
+
+async def tamil_or_blank(text: str) -> str:
+    """Display-only Tamil copy of the owner summary; blank if Sarvam is unavailable."""
+    try:
+        result = await sarvam_request("POST", "/translate", json=translation_body(text, "en-IN", "ta-IN"))
+    except HTTPException:
+        return ""
+    translated = result.get("translated_text")
+    return translated if isinstance(translated, str) else ""
 
 
 @router.post("/translate")
@@ -122,14 +156,7 @@ async def translate_display_text(body: TranslationInput, actor: Actor):
     if body.source_language == body.target_language:
         return {"text": body.text, "language": body.target_language}
     result = await sarvam_request(
-        "POST",
-        "/translate",
-        json={
-            "input": body.text,
-            "source_language_code": body.source_language,
-            "target_language_code": body.target_language,
-            "model": "sarvam-translate:v1",
-        },
+        "POST", "/translate", json=translation_body(body.text, body.source_language, body.target_language),
     )
     if not isinstance(result.get("translated_text"), str):
         raise HTTPException(502, "Sarvam did not return translated text.")

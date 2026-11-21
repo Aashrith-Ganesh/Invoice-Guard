@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     sarvam_api_key: SecretStr = SecretStr("")
     sarvam_model: str = "sarvam-105b"
     sarvam_timeout_seconds: float = 60.0
+    # Sandbox Cashfree Relay "Invoice Intake" inbound webhook. The full URL is a credential.
+    relay_intake_webhook_url: SecretStr = SecretStr("")
     agent_max_tool_rounds: int = 5
     agent_max_tool_calls: int = 10
 

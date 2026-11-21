@@ -1,33 +1,88 @@
-"""Render the synthetic English test invoice at tests/fixtures/invoice_test_001.png.
+"""Render the synthetic English test invoices in tests/fixtures/.
 
     python scripts/make_test_invoice.py
 
 Needs Pillow (dev-only, not in requirements.txt). All names, GSTINs and bank details are fake.
-Amounts are integer paise; the script asserts the arithmetic before drawing, so the image is internally consistent.
+Amounts are integer paise; each variant asserts its arithmetic before drawing.
+
+    invoice_test_001.png   Unregistered supplier (GSTIN not in the seeded register)    -> BLOCK
+    invoice_pass_002.png   Seeded "Fictional Vendor 3", consistent, under seeded cash  -> PASS with owner-confirmed bank
+    invoice_math_003.png   Same vendor; printed subtotal != sum of lines (planted)     -> BLOCK ARITHMETIC_SUBTOTAL
 """
+from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-OUT = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "invoice_test_001.png"
+FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
 W, H = 1240, 1754  # A4 at 150 dpi
 MARGIN = 80
 INK, GREY, RULE = (20, 20, 20), (120, 120, 120), (190, 190, 190)
-
-VENDOR = ["Sample Hardware Traders (TEST)", "12 Example Street, Demo Nagar", "Chennai 600000, Tamil Nadu",
-          "GSTIN: 33ABCDE1234F1Z5", "Phone: +91 00000 00000"]
-BUYER = ["Demo Hardware Wholesale (TEST)", "45 Placeholder Road, Test Town", "Chennai 600000, Tamil Nadu",
-         "GSTIN: 33PQRST5678K1Z2"]
-META = [("Invoice No", "INV-TEST-001"), ("Invoice Date", "18-11-2026"), ("Due Date", "18-12-2026"),
-        ("Place of Supply", "Tamil Nadu (33)")]
-# (description, HSN, qty, unit, rate in paise)
-ITEMS = [("GI Pipe 25mm x 6m, medium class", "7306", 40, "Nos", 115000),
-         ("PVC Elbow 25mm", "3917", 200, "Nos", 2250),
-         ("Cement OPC 53 grade, 50 kg bag", "2523", 100, "Bags", 39500)]
 GST_HALF_RATE = 9  # CGST 9% + SGST 9% (intra-state)
-TOTAL_IN_WORDS = "Rupees One Lakh Six Thousand Two Hundred Only"
-BANK = [("Account Name", "Sample Hardware Traders"), ("Bank", "Example Bank (TEST), Demo Nagar Branch"),
-        ("Account No", "000012345678"), ("IFSC", "TEST0000001")]
+
+# (description, HSN, qty, unit, rate in paise)
+HARDWARE_40 = [("GI Pipe 25mm x 6m, medium class", "7306", 40, "Nos", 115000),
+               ("PVC Elbow 25mm", "3917", 200, "Nos", 2250),
+               ("Cement OPC 53 grade, 50 kg bag", "2523", 100, "Bags", 39500)]
+HARDWARE_20 = [("GI Pipe 25mm x 6m, medium class", "7306", 20, "Nos", 115000),
+               ("PVC Elbow 25mm", "3917", 100, "Nos", 2500),
+               ("Cement OPC 53 grade, 50 kg bag", "2523", 40, "Bags", 40000)]
+VENDOR_3 = ["Fictional Vendor 3", "7 Sample Lane, Demo Nagar", "Chennai 600000, Tamil Nadu",
+            "GSTIN: 99ZZZZZ0002Z0Z0", "Phone: +91 00000 00000"]
+PAYABLES_CO = ["Fictional Payables Co.", "45 Placeholder Road, Test Town", "Chennai 600000, Tamil Nadu",
+               "GSTIN: 33PQRST5678K1Z2"]
+VENDOR_3_BANK = [("Account Name", "Fictional Vendor 3"), ("Bank", "Example Bank (TEST), Demo Nagar Branch"),
+                 ("Account No", "000098765432"), ("IFSC", "TEST0000003")]
+
+
+@dataclass(frozen=True)
+class Variant:
+    file: str
+    vendor: list[str]
+    buyer: list[str]
+    meta: list[tuple[str, str]]
+    items: list[tuple[str, str, int, str, int]]
+    bank: list[tuple[str, str]]
+    total_in_words: str
+    expected_total: int  # paise; guards the hand-written amount in words
+    printed_subtotal: int | None = None  # set only to plant an arithmetic error
+    itemised_tax: bool = False  # also print IGST @ 0% and a Total Tax line
+
+
+VARIANTS = [
+    Variant(
+        file="invoice_test_001.png",
+        vendor=["Sample Hardware Traders (TEST)", "12 Example Street, Demo Nagar", "Chennai 600000, Tamil Nadu",
+                "GSTIN: 33ABCDE1234F1Z5", "Phone: +91 00000 00000"],
+        buyer=["Demo Hardware Wholesale (TEST)", "45 Placeholder Road, Test Town", "Chennai 600000, Tamil Nadu",
+               "GSTIN: 33PQRST5678K1Z2"],
+        meta=[("Invoice No", "INV-TEST-001"), ("Invoice Date", "18-11-2026"), ("Due Date", "18-12-2026"),
+              ("Place of Supply", "Tamil Nadu (33)")],
+        items=HARDWARE_40,
+        bank=[("Account Name", "Sample Hardware Traders"), ("Bank", "Example Bank (TEST), Demo Nagar Branch"),
+              ("Account No", "000012345678"), ("IFSC", "TEST0000001")],
+        total_in_words="Rupees One Lakh Six Thousand Two Hundred Only",
+        expected_total=10620000,
+    ),
+    Variant(
+        file="invoice_pass_002.png",
+        vendor=VENDOR_3, buyer=PAYABLES_CO,
+        meta=[("Invoice No", "INV-DEMO-002"), ("Invoice Date", "19-11-2026"), ("Due Date", "19-12-2026"),
+              ("Place of Supply", "Tamil Nadu (33)")],
+        items=HARDWARE_20, bank=VENDOR_3_BANK,
+        total_in_words="Rupees Forty Eight Thousand Nine Hundred Seventy Only",
+        expected_total=4897000, itemised_tax=True,
+    ),
+    Variant(
+        file="invoice_math_003.png",
+        vendor=VENDOR_3, buyer=PAYABLES_CO,
+        meta=[("Invoice No", "INV-DEMO-003"), ("Invoice Date", "20-11-2026"), ("Due Date", "20-12-2026"),
+              ("Place of Supply", "Tamil Nadu (33)")],
+        items=HARDWARE_20, bank=VENDOR_3_BANK,
+        total_in_words="Rupees Fifty Three Thousand One Hundred Only",
+        expected_total=5310000, printed_subtotal=4500000, itemised_tax=True,
+    ),
+]
 
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -54,13 +109,16 @@ def inr(paise: int) -> str:
     return ",".join(groups + [tail]) + f".{p:02d}"
 
 
-def main() -> None:
-    lines = [(d, hsn, q, u, r, q * r) for d, hsn, q, u, r in ITEMS]
-    subtotal = sum(amt for *_, amt in lines)
+def render(v: Variant) -> Path:
+    lines = [(d, hsn, q, u, r, q * r) for d, hsn, q, u, r in v.items]
+    line_sum = sum(amt for *_, amt in lines)
+    subtotal = line_sum if v.printed_subtotal is None else v.printed_subtotal
+    if v.printed_subtotal is not None:
+        assert subtotal != line_sum, "a planted subtotal error must differ from the line sum"
+    assert subtotal * GST_HALF_RATE % 100 == 0, "tax must be whole paise"
     cgst = sgst = subtotal * GST_HALF_RATE // 100
     total = subtotal + cgst + sgst
-    assert subtotal * GST_HALF_RATE % 100 == 0, "tax must be whole paise"
-    assert total == 10620000, "TOTAL_IN_WORDS is written for Rs 1,06,200.00; update both together"
+    assert total == v.expected_total, f"{v.file}: total_in_words is written for {inr(v.expected_total)}"
 
     img = Image.new("RGB", (W, H), "white")
     d = ImageDraw.Draw(img)
@@ -71,17 +129,17 @@ def main() -> None:
     d.line((MARGIN, 130, right, 130), fill=INK, width=2)
 
     y = 150
-    d.text((MARGIN, y), VENDOR[0], font=f_h, fill=INK)
-    for i, line in enumerate(VENDOR[1:], 1):
+    d.text((MARGIN, y), v.vendor[0], font=f_h, fill=INK)
+    for i, line in enumerate(v.vendor[1:], 1):
         d.text((MARGIN, y + i * 32 + 4), line, font=f_b, fill=INK)
-    for i, (k, v) in enumerate(META):
+    for i, (k, val) in enumerate(v.meta):
         d.text((760, y + i * 32), f"{k}:", font=f_b, fill=GREY)
-        d.text((right, y + i * 32), v, font=f_b, fill=INK, anchor="ra")
+        d.text((right, y + i * 32), val, font=f_b, fill=INK, anchor="ra")
 
     y = 330
     d.text((MARGIN, y), "Bill To", font=f_s, fill=GREY)
-    d.text((MARGIN, y + 26), BUYER[0], font=f_h, fill=INK)
-    for i, line in enumerate(BUYER[1:], 1):
+    d.text((MARGIN, y + 26), v.buyer[0], font=f_h, fill=INK)
+    for i, line in enumerate(v.buyer[1:], 1):
         d.text((MARGIN, y + 26 + i * 32 + 4), line, font=f_b, fill=INK)
 
     # Items table
@@ -100,9 +158,13 @@ def main() -> None:
         d.line((MARGIN, y, right, y), fill=RULE, width=1)
 
     # Totals
+    rows = [("Subtotal", subtotal, f_b), (f"CGST @ {GST_HALF_RATE}%", cgst, f_b),
+            (f"SGST @ {GST_HALF_RATE}%", sgst, f_b)]
+    if v.itemised_tax:
+        rows += [("IGST @ 0%", 0, f_b), ("Total Tax", cgst + sgst, f_b)]
+    rows.append(("Total (INR)", total, f_h))
     y += 20
-    for label, value, f in [("Subtotal", subtotal, f_b), (f"CGST @ {GST_HALF_RATE}%", cgst, f_b),
-                            (f"SGST @ {GST_HALF_RATE}%", sgst, f_b), ("Total (INR)", total, f_h)]:
+    for label, value, f in rows:
         if f is f_h:
             d.line((760, y, right, y), fill=INK, width=2)
             y += 10
@@ -112,17 +174,17 @@ def main() -> None:
 
     y += 20
     d.text((MARGIN, y), "Amount in words:", font=f_s, fill=GREY)
-    d.text((MARGIN, y + 26), TOTAL_IN_WORDS, font=f_h, fill=INK)
+    d.text((MARGIN, y + 26), v.total_in_words, font=f_h, fill=INK)
 
     # Bank details
     y += 110
     d.rectangle((MARGIN, y, 760, y + 200), outline=INK, width=2)
     d.text((MARGIN + 20, y + 16), "Bank Details (for payment)", font=f_h, fill=INK)
-    for i, (k, v) in enumerate(BANK):
+    for i, (k, val) in enumerate(v.bank):
         d.text((MARGIN + 20, y + 62 + i * 32), f"{k}:", font=f_b, fill=GREY)
-        d.text((MARGIN + 210, y + 62 + i * 32), v, font=f_b, fill=INK)
+        d.text((MARGIN + 210, y + 62 + i * 32), val, font=f_b, fill=INK)
 
-    d.text((right, y + 120), "For Sample Hardware Traders (TEST)", font=f_b, fill=INK, anchor="ra")
+    d.text((right, y + 120), f"For {v.vendor[0]}", font=f_b, fill=INK, anchor="ra")
     d.line((right - 300, y + 185, right, y + 185), fill=INK, width=1)
     d.text((right, y + 192), "Authorised Signatory", font=f_s, fill=GREY, anchor="ra")
 
@@ -130,9 +192,16 @@ def main() -> None:
     d.text((W // 2, H - 80), "SYNTHETIC TEST INVOICE - fictional data for software testing only. Not a real document.",
            font=f_s, fill=GREY, anchor="mt")
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    img.save(OUT, optimize=True)
-    print(f"Wrote {OUT} ({OUT.stat().st_size} bytes); total {inr(total)}")
+    out = FIXTURES / v.file
+    out.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out, optimize=True)
+    print(f"Wrote {out} ({out.stat().st_size} bytes); total {inr(total)}")
+    return out
+
+
+def main() -> None:
+    for variant in VARIANTS:
+        render(variant)
 
 
 if __name__ == "__main__":
