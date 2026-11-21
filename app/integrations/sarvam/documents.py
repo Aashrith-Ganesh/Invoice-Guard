@@ -1,5 +1,6 @@
 import httpx
 from fastapi import HTTPException
+
 from app.config import get_settings
 
 
@@ -28,5 +29,3 @@ async def sarvam_request(method: str, path: str, **kwargs) -> dict:
     if not isinstance(payload, dict):
         raise HTTPException(502, "Unexpected Sarvam response format.")
     return payload
-
-

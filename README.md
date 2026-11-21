@@ -80,7 +80,7 @@ An approval challenge reports `PENDING_APPROVAL` and confirmation reports `APPRO
 
 Simulator event JSON contains `external_reference` and `status`. Set `X-Simulator-Signature` to the hex HMAC-SHA256 of the exact raw body using `CHECK_SIMULATOR_SECRET`. This protocol is specific to the local simulator. A signed event moves INITIATED to SUCCESS, FAILED, or UNKNOWN. UNKNOWN retains reserved cash and allows reconciliation to SUCCESS or FAILED. SUCCESS can move to REVERSED. FAILED and REVERSED release reserved cash once. To start another attempt after FAILED or after investigating REVERSED, the owner must issue and confirm a fresh approval with the last `previous_payment_id` and a `reason`. Initiation then requires a new idempotency key.
 
-Live Sarvam adapters, Cashfree payouts and signature verification, and Relay deployment are future integration work. The local bank operator records demo verification only. Correcting non-bank extraction errors or adjudicating potential duplicates requires an out-of-band review.
+Live Sarvam credentials and execution, Cashfree payouts and provider signature verification, and Relay deployment still require external verification. The local bank operator records demo verification only. Correcting non-bank extraction errors or adjudicating potential duplicates requires an out-of-band review.
 
 ## Sarvam agent
 
@@ -93,10 +93,33 @@ List agents with `GET /api/v1/agent-runs`. POST to the same path with
 The vendor tool reads the authenticated business's vendor records. Chat output
 is advisory. Payment validation, approval and initiation use the existing APIs.
 
-Upload a PDF as multipart field `file` to `POST /api/agents/sarvam/invoices`.
-Poll `GET /api/agents/sarvam/invoices/{job_id}` with the submitting business's
-credential. Review partial extractions. Submit structured invoice data through
-the existing validation endpoint before approval. For display translation,
-POST `text`, `source_language` and `target_language` to
-`/api/agents/sarvam/translate`. The frontend helpers accept a fetch function
+Upload a synthetic PDF as multipart field `file` to `POST /api/agents/sarvam/invoices`.
+Poll `GET /api/agents/sarvam/invoices/{job_id}` with a credential for the same business.
+Inspect the source and completed extraction before submitting a validation decision.
+A partial job can be inspected and must be completed before validation.
+
+Call `POST /api/agents/sarvam/invoices/{job_id}/validate` with the independently
+recorded `acceptance_date` and `written_agreement`. After checking the destination
+independently, the authenticated owner can include `confirmed_bank_reference`.
+The mapper rejects a conflicting observed reference by leaving banking evidence
+unset. The existing validator still checks the chosen reference against the
+vendor's current verified primary account. Owner payment approval is a separate
+step. The job keeps the original provider result and annotations for audit, the
+invoice retains its mapped input, and the audit event links the records.
+
+Use the common [extraction schema](docs/relay/sarvam_invoice_schema.json) for
+Relay. It transcribes supplier identity, line items, totals and individual GST
+components, with opaque banking references. Supply explicit zero tax amounts and
+rates when documented. Empty tax components and ambiguous dates remain missing
+and can hold the invoice. Only unambiguous ISO invoice dates are mapped. Confidence
+uses the provider's 0–1 scale, with the lowest applicable quantity or unit-price
+score used for line items.
+
+For display translation, POST `text`, `source_language` and `target_language`
+to `/api/agents/sarvam/translate`. The frontend helpers accept a fetch function
 from the host app for authenticated requests. Keep the provider key server-side.
+
+The PNG fixture in `tests/fixtures` is for the Relay intake rehearsal. To send
+its event, configure the isolated Relay test webhook and pass a reachable
+synthetic file URL to `python -m scripts.send_test_invoice --confirm-isolated-test --file-url URL`.
+The sender emits only the HTTP status after submission. See the [integration report](docs/PS3_INTEGRATION.md).

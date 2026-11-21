@@ -2,13 +2,12 @@
 
 Purpose: let Relay capture a sample payload for the trigger. Sandbox only; the payload is synthetic.
 
-    python scripts/send_test_invoice.py [--file-url URL]
+    python scripts/send_test_invoice.py --confirm-isolated-test [--file-url URL]
 
-Reads RELAY_INTAKE_WEBHOOK_URL from .env. The webhook path is a secret, so it is masked in output.
+Reads RELAY_INTAKE_WEBHOOK_URL from .env. The webhook URL is kept out of output.
 Exit codes: 0 = 2xx response, 1 = non-2xx response, 2 = config or network error.
 """
 import argparse
-import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -36,14 +35,6 @@ def build_payload(file_url: str) -> dict:
     }
 
 
-def mask_url(url: str) -> str:
-    parts = urlsplit(url)
-    head, _, token = parts.path.rpartition("/")
-    if len(token) > 10:
-        token = f"{token[:6]}...{token[-4:]}"
-    return f"{parts.scheme}://{parts.netloc}{head}/{token}"
-
-
 def fail(message: str) -> None:
     print(f"ERROR: {message}", file=sys.stderr)
     sys.exit(2)
@@ -52,7 +43,11 @@ def fail(message: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--file-url", default=DEFAULT_FILE_URL, help=f"file_url to send (default: {DEFAULT_FILE_URL})")
+    parser.add_argument("--confirm-isolated-test", action="store_true",
+                        help="Confirm this Relay trigger is isolated and has no live payment actions.")
     args = parser.parse_args()
+    if not args.confirm_isolated_test:
+        fail("Confirm the isolated Relay test workflow with --confirm-isolated-test.")
 
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
     url = os.getenv(ENV_VAR, "").strip()
@@ -62,27 +57,16 @@ def main() -> None:
         fail(f"{ENV_VAR} must be an https URL.")
 
     payload = build_payload(args.file_url)
-    print(f"POST {mask_url(url)}")
-    print(json.dumps(payload, indent=2))
-    print()
+    print("Submitting one synthetic invoice to the configured Relay test webhook.")
 
     try:
         response = httpx.post(url, json=payload, timeout=TIMEOUT_SECONDS)
     except httpx.TimeoutException:
         fail(f"No response within {TIMEOUT_SECONDS:.0f}s.")
     except httpx.HTTPError as exc:
-        fail(f"Request failed: {type(exc).__name__}: {exc}")
+        fail(f"Request failed: {type(exc).__name__}.")
 
-    print(f"Status: {response.status_code} {response.reason_phrase}")
-    print("Headers:")
-    for name, value in response.headers.items():
-        print(f"  {name}: {value}")
-    print("Body:")
-    try:
-        print(json.dumps(response.json(), indent=2, ensure_ascii=False))
-    except ValueError:
-        print(response.text if response.text else "(empty)")
-
+    print(f"HTTP {response.status_code}")
     if not response.is_success:
         print(f"\nERROR: Relay returned HTTP {response.status_code}.", file=sys.stderr)
         sys.exit(1)

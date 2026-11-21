@@ -47,7 +47,7 @@ migrations/        Alembic
 `POST invoices/validate`, `POST invoices/batch-validate`, `GET invoices/priorities`, `GET invoices/{id}`,
 `POST invoices/{id}/revalidate`, `POST approvals` (owner), `POST approvals/confirm` (owner),
 `POST payments/initiate`, `GET payments/{id}`, `POST webhooks/payout` (HMAC-signed), `GET /health`.
-The payment and validation routes use `/api/v1`. Sarvam document upload, status, and translation use `/api/agents/sarvam`. Local agent runs use `/api/v1/agent-runs`; the only registered model tool is a tenant-scoped vendor lookup.
+The payment and validation routes use `/api/v1`. Sarvam document upload, status, completed-job validation, and translation use `/api/agents/sarvam`. Local agent runs use `/api/v1/agent-runs`; the only registered model tool is a tenant-scoped vendor lookup.
 
 Validation returns HTTP 200 with PASS/HOLD/BLOCK; 422 malformed, 401/403 auth, 404 scoped miss, 409 bad transition.
 

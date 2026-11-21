@@ -19,7 +19,7 @@
     },
     "invoice_date": {
       "type": "string",
-      "description": "Invoice date as YYYY-MM-DD. Indian invoices print the day first (DD-MM-YYYY or DD/MM/YYYY). Empty string if not present or not legible."
+      "description": "Transcribe the invoice date. Use YYYY-MM-DD only when the date is unambiguous. Preserve the printed text if its ordering is ambiguous. Leave empty when absent."
     },
     "currency": {
       "type": "string",
@@ -95,21 +95,9 @@
       "type": "string",
       "description": "The amount in words exactly as printed, in its original language and script. Do not translate, convert or correct it. Empty string if not present."
     },
-    "bank_account_name": {
+    "bank_reference": {
       "type": "string",
-      "description": "Beneficiary / account holder name from the bank details section, as printed. Empty string if not present."
-    },
-    "bank_name": {
-      "type": "string",
-      "description": "Bank and branch name from the bank details section, as printed. Empty string if not present."
-    },
-    "bank_account_number": {
-      "type": "string",
-      "description": "Bank account number from the bank details section, digits only, exactly as printed. Empty string if not present or not fully legible."
-    },
-    "bank_ifsc": {
-      "type": "string",
-      "description": "11-character IFSC code from the bank details section, exactly as printed. Empty string if not present."
+      "description": "Transcribe a printed opaque ref: or demo: reference only. Leave empty when absent. Never return account numbers or infer a reference."
     }
   }
 }
