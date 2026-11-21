@@ -17,6 +17,7 @@ class Settings:
     database_url: str
     bearer_keys: dict[str, Principal]
     simulator_secret: str
+    sarvam_api_key: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -27,4 +28,5 @@ class Settings:
                 json.loads(os.getenv("CHECK_BEARER_KEYS", "{}"))
             ),
             simulator_secret=os.getenv("CHECK_SIMULATOR_SECRET", ""),
+            sarvam_api_key=os.getenv("SARVAM_API_KEY", ""),
         )

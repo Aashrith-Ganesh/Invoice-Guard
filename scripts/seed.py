@@ -17,7 +17,7 @@ def seed(engine: Engine, cash: Decimal = Decimal("100000.00")) -> None:
     with write_transaction(engine) as session:
         if session.get(Business, 1):
             raise ValueError("Business 1 already exists. Seed a fresh demo database.")
-        session.add(Business(id=1, name="Fictional Payables Co.", cash_minor=minor(cash)))
+        session.add(Business(id=1, name="Fictional Weddings & Events", cash_minor=minor(cash)))
         session.flush()
         classifications = ("Micro", "Small", "Medium", "Non-MSME")
         for number in range(1, 11):

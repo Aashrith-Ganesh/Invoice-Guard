@@ -12,6 +12,7 @@ from app.models import Approval, AuditLog, Business, Invoice, Payment, Vendor
 from app.schemas.approval import ApprovalChallenge, ApprovalRequest, ApprovalView
 from app.schemas.invoice import ExtractedInvoice
 from app.services.invoice_service import scoped_invoice
+from app.services.review_policy import primary_document, rating_cleared
 from app.services.validation_service import cash_check, minor
 from app.services.vendor_service import primary_account
 
@@ -47,6 +48,11 @@ def require_eligible(session: Session, business: Business, invoice: Invoice) -> 
         raise reject(409, "INVOICE_INELIGIBLE", "Invoice must pass validation before approval or payout.")
     if not bank_is_current(session, invoice):
         raise reject(409, "BANK_CHANGED", "The verified bank account has changed since validation.")
+    document = primary_document(session, business.id, invoice.id)
+    if document is not None and document.review_status == "REJECTED":
+        raise reject(409, "INVOICE_REJECTED", "A reviewer rejected this invoice.")
+    if document is not None and not rating_cleared(document):
+        raise reject(409, "REVIEW_REQUIRED", "The invoice is on hold for human review.")
     extracted = ExtractedInvoice.model_validate(invoice.extracted)
     if (extracted.grand_total is None or minor(extracted.grand_total) != invoice.amount_minor
             or extracted.currency != invoice.currency):

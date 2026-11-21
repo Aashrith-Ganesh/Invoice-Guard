@@ -37,6 +37,15 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 In a second terminal, run `.venv/bin/python -m scripts.demo` against the freshly seeded server. It exercises a valid invoice, a duplicate invoice, invalid arithmetic, a changed bank account, an unknown vendor, and a repeated payment request. Run `.venv/bin/python -m pytest -q` for the tests. The seeder creates one business, ten fictional vendors, and three account records per vendor.
 
+## Merchant app
+
+With the server running, open http://127.0.0.1:8000/ and paste `CHECK_DEMO_OWNER_KEY` from `.env`. Upload invoice PDFs
+(or use **Try a sample**). Each upload is read, checked against the rules and rated by Prism. Invoices with passing rules
+and a rating of 80 or more are **Processed** and ready for payment in Cashfree; everything else is **On hold** for a person
+to verify or reject. Any invoice can be read in English, Tamil or Hindi offline, or any Sarvam language when
+`SARVAM_API_KEY` is set. Offline, extraction reads a payload embedded in the synthetic sample PDFs and the Prism rating is a
+heuristic stand-in. Real PDFs without that payload land on hold as unreadable until the live Sarvam adapter is added.
+
 ## API
 
 Business and role come from the Bearer credential. `owner` can issue and confirm approvals, while `service` can validate, read, and initiate against an existing confirmed approval. Discover request and response definitions at local `/docs`.

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vendor bills</title>
+  <meta name="description" content="Upload wedding vendor bills, read them in your language, and pay only what checks out.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Noto+Sans+Tamil:wght@400;600&family=Noto+Sans+Devanagari:wght@400;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23b3125a'/%3E%3Ctext x='16' y='23' font-family='Georgia,serif' font-size='20' font-style='italic' fill='white' text-anchor='middle'%3Eb%3C/text%3E%3C/svg%3E">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to bills</a>
+
+  <section id="connect" class="connect" hidden>
+    <form class="connect-card" id="connect-form">
+      <p class="eyebrow-mark" aria-hidden="true">b</p>
+      <h1 data-t="connectTitle"></h1>
+      <p class="muted" data-t="connectBody"></p>
+      <label for="key-input" data-t="keyLabel"></label>
+      <input id="key-input" type="password" autocomplete="off" spellcheck="false" required>
+      <p class="form-error" id="connect-error" role="alert" hidden></p>
+      <button class="btn btn-primary" type="submit" data-t="connect"></button>
+      <div class="lang-row">
+        <button type="button" class="chip" data-lang="en">English</button>
+        <button type="button" class="chip" data-lang="ta">தமிழ்</button>
+        <button type="button" class="chip" data-lang="hi">हिन्दी</button>
+      </div>
+    </form>
+  </section>
+
+  <div id="shell" class="shell" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-name" id="brand-name"></span>
+      </div>
+      <div class="topbar-right">
+        <p class="cash"><span data-t="cash"></span> <strong id="cash"></strong></p>
+        <label class="select-wrap"><span class="sr" data-t="language"></span>
+          <select id="ui-lang">
+            <option value="en">English</option><option value="ta">தமிழ்</option><option value="hi">हिन्दी</option>
+          </select>
+        </label>
+        <button class="icon-btn" id="theme-btn" type="button" aria-label="Toggle dark mode">
+          <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+        </button>
+        <button class="btn btn-quiet" id="disconnect-btn" type="button" data-t="disconnect"></button>
+      </div>
+    </header>
+
+    <section class="intake" id="intake" aria-label="Add bills">
+      <div>
+        <h1 class="page-title" data-t="pageTitle"></h1>
+        <p class="muted" data-t="dropHint"></p>
+      </div>
+      <div class="intake-actions">
+        <div class="menu-wrap">
+          <button class="btn btn-ghost" id="sample-btn" type="button" aria-haspopup="true" aria-expanded="false" data-t="trySample"></button>
+          <div class="menu" id="sample-menu" role="menu" hidden></div>
+        </div>
+        <label class="btn btn-primary file-btn">
+          <input id="file-input" type="file" accept="application/pdf,.pdf" multiple>
+          <span data-t="choose"></span>
+        </label>
+      </div>
+    </section>
+
+    <ul class="pending" id="pending" aria-live="polite"></ul>
+
+    <main id="main" class="board">
+      <section class="column" data-lane="ON_HOLD" aria-labelledby="col-hold">
+        <header class="column-head">
+          <h2 id="col-hold"><span data-t="onHold"></span> <span class="count" id="count-ON_HOLD"></span></h2>
+          <p class="column-sub"><span data-t="holdSub"></span> <strong class="sum" id="sum-ON_HOLD"></strong></p>
+        </header>
+        <ol class="cards" id="cards-ON_HOLD"></ol>
+      </section>
+      <section class="column" data-lane="PROCESSED" aria-labelledby="col-done">
+        <header class="column-head">
+          <h2 id="col-done"><span data-t="processed"></span> <span class="count" id="count-PROCESSED"></span></h2>
+          <p class="column-sub"><span data-t="doneSub"></span> <strong class="sum" id="sum-PROCESSED"></strong></p>
+        </header>
+        <ol class="cards" id="cards-PROCESSED"></ol>
+      </section>
+    </main>
+
+    <details class="rejected" id="rejected" hidden>
+      <summary><span data-t="rejected"></span> <span class="count" id="count-REJECTED"></span></summary>
+      <ol class="cards" id="cards-REJECTED"></ol>
+    </details>
+  </div>
+
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="detail" aria-label="Bill details" tabindex="-1" hidden></aside>
+
+  <div class="drop-overlay" id="drop-overlay" hidden><p data-t="dropOverlay"></p></div>
+
+  <dialog id="review-dialog" class="dialog">
+    <form method="dialog" id="review-form">
+      <h3 id="review-title"></h3>
+      <p class="muted" id="review-body"></p>
+      <label for="review-note" data-t="note"></label>
+      <textarea id="review-note" rows="3" maxlength="500"></textarea>
+      <p class="form-error" id="review-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" value="cancel" type="button" id="review-cancel" data-t="cancel"></button>
+        <button class="btn btn-primary" id="review-submit" type="submit"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>

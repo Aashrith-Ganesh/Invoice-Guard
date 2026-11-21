@@ -8,12 +8,12 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import Actor, Database
 from app.core.exceptions import reject
 from app.database.session import write_transaction
-from app.models import Business, Invoice, Vendor, VendorBankAccount
+from app.models import Business, Invoice, VendorBankAccount
 from app.schemas.invoice import ExtractedInvoice, RevalidateRequest
-from app.schemas.validation import BatchItem, Check, Decision, ErrorDetail
-from app.services.approval_service import RETRYABLE, available_approval, bank_is_current, latest_payment
-from app.services.invoice_service import decision, evaluate, latest_checks, outcome, scoped_invoice
-from app.services.validation_service import cash_check
+from app.schemas.validation import BatchItem, Decision, ErrorDetail
+from app.services.approval_service import RETRYABLE, latest_payment
+from app.services.invoice_service import evaluate, latest_checks, scoped_invoice
+from app.services.view_service import invoice_view
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -45,24 +45,6 @@ def batch_validate(items: Annotated[list[Any], Body(min_length=1, max_length=100
             result = evaluate(session, session.get(Business, actor.business_id), data, raw)
         results.append(BatchItem(status_code=200, decision=result))
     return results
-
-
-def invoice_view(session: Session, business: Business, invoice: Invoice) -> Decision:
-    vendor = session.get(Vendor, invoice.vendor_id) if invoice.vendor_id else None
-    checks = latest_checks(session, invoice)
-    previous = latest_payment(session, invoice)
-    can_approve = not previous or previous.status in RETRYABLE
-    if can_approve:
-        live_cash = cash_check(business, invoice.currency, invoice.amount_minor)
-        persisted_cash_hold = any(check.code in {"INSUFFICIENT_CASH", "CURRENCY_UNSUPPORTED"} for check in checks)
-        if not persisted_cash_hold:
-            checks = [check for check in checks if check.code != "CASH_AVAILABLE"]
-            checks.extend(live_cash)
-        if outcome(checks) == "PASS" and not bank_is_current(session, invoice):
-            checks.append(Check(code="BANK_CHANGED", status="HOLD",
-                                detail="The verified bank account has changed since validation."))
-    permitted = can_approve and outcome(checks) == "PASS" and available_approval(session, invoice, previous)
-    return decision(business, invoice, vendor, checks, permitted=permitted, can_approve=can_approve)
 
 
 @router.get("/priorities")

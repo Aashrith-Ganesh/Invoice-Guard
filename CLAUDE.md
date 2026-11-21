@@ -33,11 +33,14 @@ Google Sheet "PS3 Ledger" is the audit trail, one row per invoice.
 
 ```
 app/api/v1/        invoices, approvals, payments, webhooks routers (thin; logic lives in services)
-app/services/      validation, duplicate, vendor, prioritisation, invoice, approval, payment
+app/services/      validation, duplicate, vendor, prioritisation, invoice, approval, payment,
+                   document (PDF upload), review_policy (lane rule), view, plain_language, samples
 app/models/        SQLAlchemy models; every table is business-scoped (business_id)
 app/schemas/       pydantic request/response models
 app/core/          config (env), security (token hash), exceptions (reject()), masking
-app/integrations/  cashfree/simulator.py (local payout simulator); sarvam/ and relay/ are EMPTY
+app/integrations/  cashfree/simulator.py (local payout simulator); sarvam/ = demo extractor, heuristic Prism stand-in,
+                   Sarvam translate (live only with SARVAM_API_KEY); relay/ is EMPTY
+frontend/          merchant app (static ES modules, no build step), served at /app
 scripts/           seed, demo, verify_demo_bank
 tests/             conftest (api fixture), test_invoices, test_payments, test_red_lines
 migrations/        Alembic
@@ -48,11 +51,19 @@ migrations/        Alembic
 `POST invoices/validate`, `POST invoices/batch-validate`, `GET invoices/priorities`, `GET invoices/{id}`,
 `POST invoices/{id}/revalidate`, `POST approvals` (owner), `POST approvals/confirm` (owner),
 `POST payments/initiate`, `GET payments/{id}`, `POST webhooks/payout` (HMAC-signed), `GET /health`.
+Merchant app: `GET workspace`, `POST documents` (PDF), `GET documents`, `GET documents/{id}`, `GET documents/{id}/file`,
+`POST documents/{id}/review` (owner; verify|reject), `POST documents/{id}/translate`, `GET samples`, `GET samples/{name}`.
 Validation returns HTTP 200 with PASS/HOLD/BLOCK; 422 malformed, 401/403 auth, 404 scoped miss, 409 bad transition.
 
 ## Decisions (agreed by the team)
 
 - A changed bank reference (`BANK_CHANGE`) is a **HOLD**, not a BLOCK. A same vendor/date/amount invoice with a different number (`POSSIBLE_DUPLICATE`) is a **HOLD**. HOLD still prevents approval and payout until an independent verification or revalidation clears it. Do not change these to BLOCK.
+
+- **Merchant flow (Nov 2026):** vendors no longer use the platform; the merchant uploads the invoice PDF. Lanes are
+  decided in code by `review_policy.lane`: **Processed** = rule checks PASS and (Prism rating >= 80 or a person verified it);
+  **On hold** otherwise. A rating can't clear a rule HOLD/BLOCK, and "verify" is refused unless rules pass. An on-hold or
+  rejected document blocks approval (`REVIEW_REQUIRED` / `INVOICE_REJECTED` in `approval_service.require_eligible`).
+  Payment UI belongs to Cashfree's site; our "Continue to payment" only posts `payables:payment-ready` to the host page.
 
 ## Red lines
 
