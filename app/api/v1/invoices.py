@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import Actor, Database
+from app.api.dependencies import Actor, Database, ReadActor
 from app.core.exceptions import reject
 from app.database.session import write_transaction
 from app.models import Business, Invoice, Vendor, VendorBankAccount
@@ -70,7 +70,7 @@ def invoice_view(session: Session, business: Business, invoice: Invoice) -> Deci
 
 
 @router.get("/priorities")
-def priorities(actor: Actor, engine: Database) -> list[Decision]:
+def priorities(actor: ReadActor, engine: Database) -> list[Decision]:
     with Session(engine) as session:
         business = session.get(Business, actor.business_id)
         invoices = session.scalars(select(Invoice).where(Invoice.business_id == business.id).order_by(Invoice.id))
@@ -79,7 +79,7 @@ def priorities(actor: Actor, engine: Database) -> list[Decision]:
 
 
 @router.get("/{invoice_id}")
-def get_invoice(invoice_id: int, actor: Actor, engine: Database) -> Decision:
+def get_invoice(invoice_id: int, actor: ReadActor, engine: Database) -> Decision:
     with Session(engine) as session:
         invoice = scoped_invoice(session, actor.business_id, invoice_id)
         return invoice_view(session, session.get(Business, actor.business_id), invoice)

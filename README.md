@@ -123,3 +123,10 @@ The PNG fixture in `tests/fixtures` is for the Relay intake rehearsal. To send
 its event, configure the isolated Relay test webhook and pass a reachable
 synthetic file URL to `python -m scripts.send_test_invoice --confirm-isolated-test --file-url URL`.
 The sender emits only the HTTP status after submission. See the [integration report](docs/PS3_INTEGRATION.md).
+
+## PS3 MCP server
+
+The local stdio MCP server exposes tenant-scoped invoice and simulated payment
+reads plus a non-persisting validation preview. It uses a dedicated `mcp` bearer
+role. See the [architecture and setup](docs/architecture/mcp-architecture.md) and
+[Codex example](mcp/codex-config.example.toml).

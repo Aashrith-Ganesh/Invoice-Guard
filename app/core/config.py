@@ -9,7 +9,7 @@ from pydantic import BaseModel, PositiveInt, StringConstraints, TypeAdapter
 
 class Principal(BaseModel):
     business_id: PositiveInt
-    role: Literal["service", "owner"]
+    role: Literal["service", "owner", "mcp"]
     subject: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")] | None = None
 
 

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import Actor, Database
+from app.api.dependencies import Actor, Database, ReadActor
 from app.core.exceptions import reject
 from app.database.session import write_transaction
 from app.models import Business, Payment
@@ -21,7 +21,7 @@ def initiate_payment(data: InitiateRequest, actor: Actor, engine: Database, resp
 
 
 @router.get("/{payment_id}")
-def get_payment(payment_id: int, actor: Actor, engine: Database) -> PaymentView:
+def get_payment(payment_id: int, actor: ReadActor, engine: Database) -> PaymentView:
     with Session(engine) as session:
         attempt = session.scalar(select(Payment).where(
             Payment.business_id == actor.business_id, Payment.id == payment_id,

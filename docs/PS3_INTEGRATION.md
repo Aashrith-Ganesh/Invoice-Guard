@@ -35,3 +35,10 @@ Live Sarvam extraction, authenticated Relay access and a verified Relay draft
 environment, and a Cashfree Sandbox payout remain external verification steps.
 The integration tests use mocked Sarvam responses. The payout demo uses a local
 simulator and its separate signed settlement protocol.
+
+## Project MCP
+
+The repository includes a stdio MCP server for tenant-scoped invoice and simulated
+payment reads and non-persisting validation. See the [MCP architecture](architecture/mcp-architecture.md)
+and [Codex example](../mcp/codex-config.example.toml). The hosted Cashfree MCP and
+its merchant OAuth remain separate.

@@ -21,7 +21,7 @@ def get_engine(request: Request) -> Engine:
 Database = Annotated[Engine, Depends(get_engine)]
 
 
-def authenticate(
+def resolve_principal(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     engine: Database,
@@ -39,7 +39,25 @@ def authenticate(
     raise error
 
 
+ReadActor = Annotated[Principal, Depends(resolve_principal)]
+
+
+def authenticate(actor: ReadActor) -> Principal:
+    if actor.role == "mcp":
+        raise reject(403, "MCP_READ_ONLY", "The MCP credential is scoped to reads and previews.")
+    return actor
+
+
 Actor = Annotated[Principal, Depends(authenticate)]
+
+
+def require_mcp(actor: ReadActor) -> Principal:
+    if actor.role != "mcp":
+        raise reject(403, "MCP_CREDENTIAL_REQUIRED", "A dedicated MCP credential is required.")
+    return actor
+
+
+MCPActor = Annotated[Principal, Depends(require_mcp)]
 
 
 def require_owner(actor: Actor) -> Principal:
