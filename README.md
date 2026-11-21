@@ -81,3 +81,22 @@ An approval challenge reports `PENDING_APPROVAL` and confirmation reports `APPRO
 Simulator event JSON contains `external_reference` and `status`. Set `X-Simulator-Signature` to the hex HMAC-SHA256 of the exact raw body using `CHECK_SIMULATOR_SECRET`. This protocol is specific to the local simulator. A signed event moves INITIATED to SUCCESS, FAILED, or UNKNOWN. UNKNOWN retains reserved cash and allows reconciliation to SUCCESS or FAILED. SUCCESS can move to REVERSED. FAILED and REVERSED release reserved cash once. To start another attempt after FAILED or after investigating REVERSED, the owner must issue and confirm a fresh approval with the last `previous_payment_id` and a `reason`. Initiation then requires a new idempotency key.
 
 Live Sarvam adapters, Cashfree payouts and signature verification, and Relay deployment are future integration work. The local bank operator records demo verification only. Correcting non-bank extraction errors or adjudicating potential duplicates requires an out-of-band review.
+
+## Sarvam agent
+
+Set `SARVAM_API_KEY` in the server environment, install requirements and run
+`alembic upgrade head` before starting the API. All agent routes require the
+existing business bearer credential. Use synthetic documents and text only.
+
+List agents with `GET /api/v1/agent-runs`. POST to the same path with
+`{"agent_id":"vendor_agent","input":{"type":"text","content":"Look up vendor 1"}}`.
+The vendor tool reads the authenticated business's vendor records. Chat output
+is advisory. Payment validation, approval and initiation use the existing APIs.
+
+Upload a PDF as multipart field `file` to `POST /api/agents/sarvam/invoices`.
+Poll `GET /api/agents/sarvam/invoices/{job_id}` with the submitting business's
+credential. Review partial extractions. Submit structured invoice data through
+the existing validation endpoint before approval. For display translation,
+POST `text`, `source_language` and `target_language` to
+`/api/agents/sarvam/translate`. The frontend helpers accept a fetch function
+from the host app for authenticated requests. Keep the provider key server-side.
