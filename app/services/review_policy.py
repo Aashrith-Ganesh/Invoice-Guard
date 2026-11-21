@@ -15,7 +15,14 @@ THRESHOLD = 80
 Lane = Literal["PROCESSED", "ON_HOLD", "REJECTED"]
 
 
+def processing_override(document: Document) -> Literal["skip_tax", "process_demo"] | None:
+    action = (document.extraction or {}).get("processing_override")
+    return action if action in ("skip_tax", "process_demo") else None
+
+
 def rating_cleared(document: Document) -> bool:
+    if processing_override(document):
+        return False
     if document.review_status == "VERIFIED":
         return True
     return document.rating_score is not None and document.rating_score >= THRESHOLD

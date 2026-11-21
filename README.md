@@ -1,10 +1,12 @@
 # Accounts Payable Check Service
 
-FastAPI service for the Cashfree × Sarvam Hackathon. It accepts structured extraction, evaluates invoice rules, records owner approval, and simulates payout attempts. The Sarvam Vision and Cashfree Relay hand-off is the JSON API. Payouts and payout events run entirely in the simulator.
+FastAPI service for the Cashfree × Sarvam Hackathon. It accepts structured extraction, evaluates invoice rules, records owner approval, and simulates payout attempts. The merchant dashboard can use Sarvam for document extraction and translation. A separate intake endpoint can notify a configured Relay webhook. Payouts and payout events run entirely in the simulator.
+
+See the [demo runbook](docs/DEMO.md) for the dashboard walkthrough, integrations, and two-port payment setup. See [deployment](docs/DEPLOYMENT.md) for hosting.
 
 ## Run locally
 
-From the project directory, with Python 3.12 or later:
+Run these commands from the cloned repository root, where `requirements.txt` and `frontend/` are located. Use Python 3.12 or later:
 
 ```sh
 python3 -m venv .venv
@@ -32,6 +34,7 @@ PY
 chmod 600 .env
 alembic upgrade head
 python -m scripts.seed --cash 100000.00
+(cd frontend && npm ci && npm run build)
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -187,13 +190,15 @@ reads plus a non-persisting validation preview. It uses a dedicated `mcp` bearer
 role. See the [architecture and setup](docs/architecture/mcp-architecture.md) and
 [Codex example](mcp/codex-config.example.toml).
 
-### Hosted simulation links
+## Hosted simulation links
 
-Open a processed invoice as an owner, review its payment terms, then confirm
-the owner approval. Choose **Create simulation link** and use **Copy link**
+Choose **Payment link** on the card of an eligible processed invoice. As an
+owner, review the payment terms and confirm the approval. Choose **Create simulation link** and use **Copy link**
 or **Open link**. The hosted page displays the approved invoice and offers
 **Simulate Payment**. A completed simulation displays its payment reference
-when reopened. Use a reachable HTTPS deployment for sharing off this machine.
+when reopened. Set `CHECK_HOSTED_PAYMENT_ORIGIN` and start the restricted
+listener to serve links from a second port. See the [demo runbook](docs/DEMO.md).
+Use a reachable HTTPS deployment for sharing off this machine.
 
 The link expires when its underlying approval expires. The URL fragment is
 a bearer capability, so share it only with the intended tester. Keep

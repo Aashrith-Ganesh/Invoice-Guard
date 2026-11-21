@@ -80,7 +80,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .eyebrow-mark { width: 44px; height: 44px; border-radius: 12px; background: var(--rani); color: #fff; font: italic 30px/44px var(--serif); text-align: center; }
 .connect-card h1 { font: 400 34px/1.1 var(--serif); margin-top: 8px; }
 .connect-card label { font-weight: 600; margin-top: 8px; }
-.connect-card input, .dialog textarea { width: 100%; min-height: 44px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--sunk); }
+.connect-card input, .dialog textarea, .dialog input { width: 100%; min-height: 44px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--sunk); }
 .lang-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .form-error { color: var(--stop); font-size: 14px; }
 
@@ -134,6 +134,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .column-sub .sum { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .card { grid-template-columns: minmax(0, 1fr); min-width: 0; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; cursor: pointer; display: grid; gap: 10px; transition: border-color .15s, transform .15s; }
+.card-payment { margin: .45rem 0 0; }
 .card:hover { border-color: var(--line-strong); }
 .card[aria-current="true"] { border-color: var(--rani); box-shadow: 0 0 0 3px var(--rani-wash); }
 .card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }

@@ -22,6 +22,9 @@ class Settings:
     sarvam_api_key: str = ""
     document_extractor_mode: Literal["demo", "sarvam"] = "demo"
     cors_origins: tuple[str, ...] = ()
+    hosted_payment_origin: str = ""
+    enable_demo_bill_reset: bool = False
+    enable_demo_processing: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -32,6 +35,15 @@ class Settings:
             if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username is not None
                     or parsed.path or parsed.query or parsed.fragment or "*" in origin):
                 raise ValueError("CHECK_CORS_ORIGINS must contain explicit HTTP(S) origins.")
+        hosted_payment_origin = os.getenv("CHECK_HOSTED_PAYMENT_ORIGIN", "").strip()
+        if hosted_payment_origin:
+            parsed = urlsplit(hosted_payment_origin)
+            loopback = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+            if ((parsed.scheme != "https" and not (parsed.scheme == "http" and loopback))
+                    or not parsed.hostname or parsed.username is not None or parsed.password is not None
+                    or parsed.path not in {"", "/"} or parsed.query or parsed.fragment):
+                raise ValueError("CHECK_HOSTED_PAYMENT_ORIGIN must be an HTTPS origin or HTTP loopback origin.")
+            _ = parsed.port  # Reject malformed or out-of-range ports during startup.
         return cls(
             database_url=os.getenv("CHECK_DATABASE_URL", "sqlite:///check.db"),
             bearer_keys=TypeAdapter(dict[str, Principal]).validate_python(
@@ -43,4 +55,7 @@ class Settings:
                 os.getenv("CHECK_DOCUMENT_EXTRACTOR", "demo")
             ),
             cors_origins=cors_origins,
+            hosted_payment_origin=hosted_payment_origin.rstrip("/"),
+            enable_demo_processing=TypeAdapter(bool).validate_python(os.getenv("CHECK_ENABLE_DEMO_PROCESSING", "false")),
+            enable_demo_bill_reset=TypeAdapter(bool).validate_python(os.getenv("CHECK_ENABLE_DEMO_BILL_RESET", "false")),
         )

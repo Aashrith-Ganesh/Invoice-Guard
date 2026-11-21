@@ -3,13 +3,14 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 
 from pydantic import ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import reject
 from app.database.base import utc_now
 from app.integrations.sarvam.types import Extraction, Rater, Translator
-from app.models import AuditLog, Business, Document, Invoice, Vendor
+from app.models import Approval, AuditLog, Business, Document, Invoice, InvoiceValidation, Payment, PaymentLink, Vendor
+from app.models.document_job import DocumentJob
 from app.schemas.document import (
     DocumentView, Event, RatingView, Reason, ReviewView, SignalView, TranslationView,
 )
@@ -18,12 +19,13 @@ from app.schemas.validation import Decision
 from app.services.approval_service import latest_payment
 from app.services.invoice_service import evaluate
 from app.services.payment_service import payment_view
-from app.services.plain_language import ITEMS, REASONS, SUMMARY, reason_key
-from app.services.review_policy import THRESHOLD, lane
+from app.services.plain_language import FIELD_LABELS, ITEMS, REASONS, SUMMARY, reason_key
+from app.services.review_policy import THRESHOLD, lane, processing_override
 from app.services.view_service import invoice_view
 
 MAX_BYTES = 10 * 1024 * 1024
 BUILT_IN = {"ta", "hi"}
+TAX_FIELDS = {"cgst", "sgst", "igst", "cgst_rate", "sgst_rate", "igst_rate", "tax_total"}
 
 
 def safe_filename(name: str | None) -> str:
@@ -38,6 +40,26 @@ def scoped_document(session: Session, business_id: int, document_id: int) -> Doc
     if document is None:
         raise reject(404, "DOCUMENT_NOT_FOUND", "Document was not found.")
     return document
+
+
+def clear_demo_bills(session: Session, business_id: int, owner_id: str | None) -> int:
+    scoped_documents = Document.business_id == business_id
+    cleared = session.scalar(select(func.count()).select_from(Document).where(scoped_documents))
+    for model in (PaymentLink, Payment, Approval, InvoiceValidation, Document, DocumentJob, Invoice):
+        session.execute(delete(model).where(model.business_id == business_id))
+
+    # Bill history uses integer entity IDs. Remove its entries before SQLite can reuse those IDs.
+    bill_actions = (
+        "document_uploaded", "document_verified", "document_rejected",
+        "document_skip_tax", "document_process_demo", "document_return_to_review",
+        "invoice_validated", "invoice_duplicate_submission", "approval_issued", "approval_confirmed",
+        "simulated_payment_initiated", "simulated_payment_status", "hosted_payment_link_created",
+        "hosted_simulated_payment_completed", "sarvam_extraction_validated", "relay_intake_notified",
+    )
+    session.execute(delete(AuditLog).where(AuditLog.business_id == business_id, AuditLog.action.in_(bill_actions)))
+    session.add(AuditLog(business_id=business_id, entity_id=business_id, action="demo_bills_cleared",
+                         details={"documents": cleared, "owner": owner_id}))
+    return cleared
 
 
 def validate_upload(content: bytes) -> None:
@@ -96,7 +118,8 @@ def current_decision(session: Session, business: Business, document: Document) -
     return invoice_view(session, business, session.get(Invoice, document.invoice_id))
 
 
-def reasons_for(document: Document, decision: Decision | None, language: str = "en") -> list[Reason]:
+def reasons_for(document: Document, decision: Decision | None, language: str = "en",
+                *, business: Business) -> list[Reason]:
     def text(code: str, fallback: str) -> str:
         table = REASONS.get(reason_key(code), {})
         return table.get(language) or table.get("en") or fallback
@@ -105,22 +128,52 @@ def reasons_for(document: Document, decision: Decision | None, language: str = "
     if document.review_status == "REJECTED":
         reasons.append(Reason(code="REJECTED", severity="block", text=text("REJECTED", "")))
     if decision is None:
-        reasons.append(Reason(code="EXTRACTION_FAILED", severity="hold", text=text("EXTRACTION_FAILED", "")))
+        description = text("EXTRACTION_FAILED", "")
+        if language == "en":
+            description += (" Demo mode only reads built-in samples." if document.extractor == "demo"
+                            else " No usable fields were returned. Check that the PDF is legible and try again.")
+        reasons.append(Reason(code="EXTRACTION_FAILED", severity="hold", text=description))
     else:
         if document.duplicate_submission:
             reasons.append(Reason(code="DUPLICATE_UPLOAD", severity="block", text=text("DUPLICATE_UPLOAD", "")))
         seen = set()
         for check in decision.results:
-            key = reason_key(check.code)
+            key = check.code if language == "en" else reason_key(check.code)
             if check.status == "PASS" or key in seen or (document.duplicate_submission and key == "CONFIRMED_DUPLICATE"):
                 continue
             seen.add(key)
+            description = text(check.code, check.detail)
+            if language == "en":
+                fields = ", ".join(FIELD_LABELS[field] for field in check.fields if field in FIELD_LABELS)
+                if check.code == "MISSING_FIELDS" and fields:
+                    description = f"Missing required information: {fields}."
+                    if "bank_reference" in check.fields:
+                        description += " Confirm the vendor's bank account independently before supplying its internal reference."
+                elif check.code == "LOW_CONFIDENCE" and fields:
+                    description = f"Low extraction confidence: {fields}. Compare these fields with the original PDF."
+                elif check.code.startswith("ARITHMETIC_") and fields:
+                    description = f"The {fields} does not match the calculation. {check.detail}"
+                elif check.code in {"BANK_CHANGE", "BANK_UNVERIFIED", "BANK_CHANGED"}:
+                    description = check.detail + " Confirm the account through a trusted vendor contact, then recheck the bill."
+                elif check.code == "POSSIBLE_DUPLICATE" and fields:
+                    description = f"The invoice identity matches an existing bill, but these fields differ: {fields}. Compare the two bills before paying."
+                elif check.code == "INSUFFICIENT_CASH":
+                    amount = _money(((document.extraction or {}).get("invoice") or {}).get("grand_total"))
+                    cash = Decimal(business.cash_minor).scaleb(-2)
+                    if amount is not None:
+                        description = (f"Invoice amount: {business.currency} {amount}. "
+                                       f"Available now: {business.currency} {cash:.2f}. "
+                                       "Recheck the bill when sufficient cash is available.")
             reasons.append(Reason(code=check.code, severity="block" if check.status == "BLOCK" else "hold",
-                                  text=text(check.code, check.detail)))
+                                  text=description))
     rules_clear = decision is not None and decision.overall_status == "PASS" and not document.duplicate_submission
     if rules_clear and document.review_status == "NONE" and (document.rating_score is None
                                                              or document.rating_score < THRESHOLD):
-        reasons.append(Reason(code="LOW_RATING", severity="hold", text=text("LOW_RATING", "")))
+        description = text("LOW_RATING", "")
+        if language == "en" and document.rating_score is not None:
+            description = (f"The review rating is {document.rating_score}/100. The threshold is {THRESHOLD}/100. "
+                           "Compare the extracted details with the original PDF before marking it verified.")
+        reasons.append(Reason(code="LOW_RATING", severity="hold", text=description))
     return reasons
 
 
@@ -184,6 +237,12 @@ def view(session: Session, business: Business, document: Document, *, with_event
     decision = current_decision(session, business, document)
     rule_status = decision.overall_status if decision else None
     current = lane(document, rule_status)
+    override = processing_override(document)
+    failures = [check for check in decision.results if check.status != "PASS"] if decision else []
+    missing = next((check.fields for check in failures if check.code == "MISSING_FIELDS"), [])
+    can_process = bool(missing and not override and current == "ON_HOLD" and rule_status == "HOLD"
+                       and not document.duplicate_submission)
+    can_skip_tax = can_process and len(failures) == 1 and set(missing).issubset(TAX_FIELDS)
     revalidatable = bool(decision and not document.duplicate_submission and rule_status == "HOLD"
                          and any(check.code == "DUPLICATE_SCAN" for check in decision.results))
     payment = None
@@ -192,23 +251,40 @@ def view(session: Session, business: Business, document: Document, *, with_event
     return DocumentView(
         document_id=document.id, invoice_id=document.invoice_id, filename=document.filename,
         uploaded_at=document.created_at, size_bytes=document.size_bytes, extractor=document.extractor,
-        duplicate_submission=document.duplicate_submission, lane=current,
-        reasons=reasons_for(document, decision) if current != "PROCESSED" else [],
+        duplicate_submission=document.duplicate_submission,
+        lane="PROCESSED" if override and rule_status != "BLOCK" else current,
+        processing_override=override, can_skip_tax=can_skip_tax, can_process_demo=can_process,
+        reasons=reasons_for(document, decision, business=business) if current != "PROCESSED" or override else [],
         rating=RatingView(provider=document.rating_provider, score=document.rating_score, threshold=THRESHOLD,
                           signals=[SignalView(**signal) for signal in document.rating_signals or []]),
         review=ReviewView(status=document.review_status, note=document.review_note, reviewed_at=document.reviewed_at),
-        can_verify=current == "ON_HOLD" and rule_status == "PASS" and not document.duplicate_submission,
-        can_reject=current == "ON_HOLD",
-        can_recheck=current == "ON_HOLD" and revalidatable,
-        payment_ready=current == "PROCESSED",
+        can_verify=not override and current == "ON_HOLD" and rule_status == "PASS" and not document.duplicate_submission,
+        can_reject=not override and current == "ON_HOLD",
+        can_recheck=not override and current == "ON_HOLD" and revalidatable,
+        payment_ready=not override and current == "PROCESSED",
         payment=payment_view(payment) if payment else None,
         invoice=invoice_summary(session, document, decision), decision=decision,
         events=events_for(session, document) if with_events else [],
     )
 
 
-def review(session: Session, business: Business, document: Document, action: str, note: str) -> None:
+def review(session: Session, business: Business, document: Document, action: str, note: str,
+           *, owner: str | None = None) -> None:
     current = view(session, business, document)
+    if action in {"skip_tax", "process_demo", "return_to_review"}:
+        allowed = {"skip_tax": current.can_skip_tax, "process_demo": current.can_process_demo,
+                   "return_to_review": bool(current.processing_override)}
+        if not allowed[action]:
+            raise reject(409, "REVIEW_NOT_ALLOWED", "This processing option is unavailable for the bill's current checks.")
+        extraction = dict(document.extraction or {})
+        if action == "return_to_review":
+            extraction.pop("processing_override", None)
+        else:
+            extraction["processing_override"] = action
+        document.extraction = extraction
+        session.add(AuditLog(business_id=business.id, action=f"document_{action}", entity_id=document.id,
+                             details={"note": note, "invoice_id": document.invoice_id, "owner": owner}))
+        return
     if action == "verify" and not current.can_verify:
         raise reject(409, "REVIEW_NOT_ALLOWED",
                      "Only an invoice whose rule checks pass can be verified; rule holds need their own fix.")
@@ -243,14 +319,17 @@ def _summary(current: DocumentView, language: str) -> list[str]:
     ]
     if data.get("payment_deadline"):
         lines.append(template["deadline"].format(deadline=data["payment_deadline"]))
-    lines.append(template[current.lane].format(score=current.rating.score))
+    if current.processing_override:
+        lines.append(template["ON_HOLD"].format(score=current.rating.score))
+    else:
+        lines.append(template[current.lane].format(score=current.rating.score))
     return lines
 
 
 def translate(session: Session, business: Business, document: Document, language: str,
               translator: Translator | None) -> TranslationView:
     current = view(session, business, document)
-    english_reasons = [reason.text for reason in reasons_for(document, current.decision)] if current.lane != "PROCESSED" else []
+    english_reasons = [reason.text for reason in current.reasons]
     items = [item.get("description", "") for item in current.invoice.get("items") or []]
     summary = _summary(current, "en")
     if language == "en":
@@ -262,8 +341,8 @@ def translate(session: Session, business: Business, document: Document, language
             return TranslationView(language=language, provider="sarvam", summary=translated[:first],
                                    items=translated[first:second], reasons=translated[second:])
     if language in BUILT_IN:
-        local_reasons = ([reason.text for reason in reasons_for(document, current.decision, language)]
-                         if current.lane != "PROCESSED" else [])
+        local_reasons = ([reason.text for reason in reasons_for(document, current.decision, language, business=business)]
+                         if current.reasons else [])
         return TranslationView(language=language, provider="built-in", summary=_summary(current, language),
                                items=[ITEMS.get(item, {}).get(language, item) for item in items],
                                reasons=local_reasons)

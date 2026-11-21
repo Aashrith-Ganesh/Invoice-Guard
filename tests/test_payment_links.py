@@ -76,3 +76,27 @@ def test_link_rechecks_terms_and_rejects_expired_or_invalid_token(api, invoice):
     assert public(client, "simulate", token).status_code == 410
     with Session(engine) as session:
         assert session.scalar(select(func.count()).select_from(Payment)) == 0
+
+
+def test_create_link_uses_configured_hosted_origin(api, invoice):
+    from dataclasses import replace
+
+    client, _ = api
+    client.app.state.settings = replace(client.app.state.settings, hosted_payment_origin="http://localhost:8001")
+    invoice_id = validate(api, invoice)["invoice_id"]
+    result = create(client, invoice_id, approve(client, invoice_id))
+    assert result.status_code == 201
+    assert result.json()["path"].startswith("http://localhost:8001/app/pay.html#")
+
+
+def test_hosted_listener_only_exposes_public_simulator(api):
+    from fastapi.testclient import TestClient
+
+    from app.hosted_payment import hosted_only
+
+    client, _ = api
+    with TestClient(hosted_only(client.app)) as hosted:
+        assert hosted.get("/app/").status_code == 404
+        assert hosted.get("/api/v1/workspace").status_code == 404
+        assert hosted.post("/api/v1/payments/links", json={}).status_code == 404
+        assert hosted.post("/api/v1/simulated-payment/status", json={"token": "invalid"}).status_code == 422

@@ -14,14 +14,25 @@ from app.integrations.sarvam.extractor import extract_live
 from app.integrations.sarvam.invoice_mapping import InvoiceContext
 from app.schemas.vendor import BankReference
 from app.integrations.sarvam.translate import LANGUAGES
-from app.models import Business, Document
+from app.models import AuditLog, Business, Document
 from app.schemas.document import (
-    DocumentView, ReviewRequest, Sample, TranslateRequest, TranslationView, Workspace,
+    BalanceAdjustment, BalanceView, DocumentView, ReviewRequest, Sample, TranslateRequest, TranslationView, Workspace,
 )
 from app.services import document_service, samples
 from app.services.review_policy import THRESHOLD
+from app.services.validation_service import minor
 
 router = APIRouter(tags=["documents"])
+
+
+def demo_reset_enabled(request: Request) -> bool:
+    return (request.app.state.document_extractor_mode == "demo"
+            or request.app.state.settings.enable_demo_bill_reset)
+
+
+def demo_processing_enabled(request: Request) -> bool:
+    return (request.app.state.document_extractor_mode == "demo"
+            or request.app.state.settings.enable_demo_processing)
 
 
 @router.get("/workspace")
@@ -32,7 +43,27 @@ def workspace(request: Request, actor: Actor, engine: Database) -> Workspace:
         return Workspace(business_name=business.name, currency=business.currency,
                          cash_available=f"{Decimal(business.cash_minor).scaleb(-2):.2f}", role=actor.role, threshold=THRESHOLD,
                          translation_provider=translator.name if translator else "built-in", languages=LANGUAGES,
-                         extraction_mode=request.app.state.document_extractor_mode)
+                         extraction_mode=request.app.state.document_extractor_mode,
+                         demo_processing_enabled=actor.role == "owner" and demo_processing_enabled(request),
+                         can_clear_bills=actor.role == "owner" and demo_reset_enabled(request))
+
+
+@router.patch("/workspace/balance")
+def adjust_balance(data: BalanceAdjustment, actor: Owner, engine: Database) -> BalanceView:
+    with write_transaction(engine) as session:
+        business = session.get(Business, actor.business_id)
+        previous = business.cash_minor
+        if previous != minor(data.expected_balance):
+            raise reject(409, "BALANCE_CHANGED", "The balance changed. Review the current balance before saving.")
+        updated = minor(data.cash_available)
+        if updated != previous:
+            business.cash_minor = updated
+            session.add(AuditLog(business_id=actor.business_id, entity_id=actor.business_id,
+                                 action="cash_balance_adjusted", details={
+                                     "previous_cash_minor": previous, "new_cash_minor": updated,
+                                     "owner": actor.subject,
+                                 }))
+        return BalanceView(cash_available=f"{Decimal(updated).scaleb(-2):.2f}")
 
 
 @router.post("/documents", status_code=201)
@@ -71,6 +102,15 @@ def list_documents(actor: Actor, engine: Database,
         return [document_service.view(session, business, row) for row in rows]
 
 
+@router.post("/documents/clear")
+def clear_demo_bills(request: Request, owner: Owner, engine: Database) -> dict[str, int]:
+    if not demo_reset_enabled(request):
+        raise reject(403, "DEMO_REQUIRED", "Clearing all bills is available only in demo mode.")
+    with write_transaction(engine) as session:
+        cleared = document_service.clear_demo_bills(session, owner.business_id, owner.subject)
+    return {"cleared": cleared}
+
+
 @router.get("/documents/{document_id}")
 def get_document(document_id: int, actor: Actor, engine: Database) -> DocumentView:
     with Session(engine) as session:
@@ -90,11 +130,14 @@ def document_file(document_id: int, actor: Actor, engine: Database) -> Response:
 
 
 @router.post("/documents/{document_id}/review")
-def review_document(document_id: int, data: ReviewRequest, owner: Owner, engine: Database) -> DocumentView:
+def review_document(document_id: int, data: ReviewRequest, request: Request,
+                    owner: Owner, engine: Database) -> DocumentView:
+    if data.action == "process_demo" and not demo_processing_enabled(request):
+        raise reject(403, "DEMO_PROCESSING_DISABLED", "Demo processing is disabled.")
     with write_transaction(engine) as session:
         business = session.get(Business, owner.business_id)
         document = document_service.scoped_document(session, business.id, document_id)
-        document_service.review(session, business, document, data.action, data.note)
+        document_service.review(session, business, document, data.action, data.note, owner=owner.subject)
         session.flush()
         return document_service.view(session, business, document, with_events=True)
 

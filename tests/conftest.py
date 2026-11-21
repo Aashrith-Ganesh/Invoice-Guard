@@ -32,6 +32,10 @@ def api(tmp_path, monkeypatch):
         "other-owner": {"business_id": 2, "role": "owner"},
     }))
     monkeypatch.setenv("CHECK_SIMULATOR_SECRET", "test-webhook")
+    monkeypatch.setenv("CHECK_HOSTED_PAYMENT_ORIGIN", "")
+    monkeypatch.setenv("CHECK_DOCUMENT_EXTRACTOR", "demo")
+    monkeypatch.setenv("CHECK_ENABLE_DEMO_BILL_RESET", "false")
+    monkeypatch.setenv("CHECK_ENABLE_DEMO_PROCESSING", "false")
     monkeypatch.setenv("SARVAM_API_KEY", "")  # tests never reach Sarvam
     app = create_app()
     from app.database.base import Base

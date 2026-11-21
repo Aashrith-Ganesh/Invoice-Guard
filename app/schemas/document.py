@@ -2,6 +2,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from app.schemas.invoice import Money
 from app.schemas.payment import PaymentView
 from app.schemas.validation import Decision
 
@@ -51,6 +52,9 @@ class DocumentView(BaseModel):
     reasons: list[Reason]
     rating: RatingView
     review: ReviewView
+    processing_override: Literal["skip_tax", "process_demo"] | None = None
+    can_skip_tax: bool = False
+    can_process_demo: bool = False
     can_verify: bool
     can_reject: bool
     can_recheck: bool
@@ -64,7 +68,7 @@ class DocumentView(BaseModel):
 class ReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["verify", "reject"]
+    action: Literal["verify", "reject", "skip_tax", "process_demo", "return_to_review"]
     note: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=500)]
 
 
@@ -90,6 +94,8 @@ class Workspace(BaseModel):
     threshold: int
     translation_provider: str
     extraction_mode: Literal["demo", "sarvam"]
+    can_clear_bills: bool
+    demo_processing_enabled: bool = False
     languages: dict[str, str]
 
 
@@ -98,3 +104,14 @@ class Sample(BaseModel):
     title: str
     description: str
     expected: Lane
+
+
+class BalanceAdjustment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_balance: Money
+    cash_available: Money
+
+
+class BalanceView(BaseModel):
+    cash_available: str

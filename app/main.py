@@ -31,7 +31,7 @@ def create_app() -> FastAPI:
     application.state.settings = Settings.from_env()
     if application.state.settings.cors_origins:
         application.add_middleware(CORSMiddleware, allow_origins=application.state.settings.cors_origins,
-                                   allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type"])
+                                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["Authorization", "Content-Type"])
     application.state.document_extractor_mode = application.state.settings.document_extractor_mode
     application.state.engine = make_engine(application.state.settings.database_url)
     application.state.extractor = DemoExtractor()

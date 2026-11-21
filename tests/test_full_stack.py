@@ -61,10 +61,11 @@ def test_cors_allows_only_configured_origin(monkeypatch, tmp_path):
     monkeypatch.setenv("CHECK_DATABASE_URL", f"sqlite:///{tmp_path / 'cors.db'}")
     monkeypatch.setenv("CHECK_CORS_ORIGINS", "https://frontend.example")
     with TestClient(create_app()) as client:
-        for origin, status in (("https://frontend.example", 200), ("https://other.example", 400)):
-            response = client.options("/api/v1/workspace", headers={
-                "Origin": origin, "Access-Control-Request-Method": "GET",
-                "Access-Control-Request-Headers": "authorization",
-            })
-            assert response.status_code == status
-            assert response.headers.get("access-control-allow-origin") == (origin if status == 200 else None)
+        for path, method in (("/workspace", "GET"), ("/workspace/balance", "PATCH")):
+            for origin, status in (("https://frontend.example", 200), ("https://other.example", 400)):
+                response = client.options(f"/api/v1{path}", headers={
+                    "Origin": origin, "Access-Control-Request-Method": method,
+                    "Access-Control-Request-Headers": "authorization,content-type",
+                })
+                assert response.status_code == status
+                assert response.headers.get("access-control-allow-origin") == (origin if status == 200 else None)

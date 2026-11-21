@@ -150,3 +150,28 @@ ITEMS: dict[str, dict[str, str]] = {
 
 def reason_key(code: str) -> str:
     return "ARITHMETIC" if code.startswith("ARITHMETIC_") else code
+
+
+FIELD_LABELS = {
+    "acceptance_date": "acceptance date",
+    "written_agreement": "written agreement status",
+    "bank_reference": "verified bank reference",
+    "gstin": "supplier GSTIN",
+    "legal_name": "supplier legal name",
+    "lines": "line items",
+    "subtotal": "subtotal",
+    "cgst": "CGST amount",
+    "cgst_rate": "CGST rate",
+    "sgst": "SGST amount",
+    "sgst_rate": "SGST rate",
+    "igst": "IGST amount",
+    "igst_rate": "IGST rate",
+    "tax_total": "tax total",
+    "grand_total": "grand total",
+    "total_in_words": "amount in words",
+    "invoice_number": "invoice number",
+    "invoice_date": "invoice date",
+    "amount_minor": "invoice amount",
+    "currency": "currency",
+    "document_sha256": "document fingerprint",
+}

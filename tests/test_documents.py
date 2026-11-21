@@ -203,3 +203,69 @@ def test_pdf_and_workspace_endpoints(api):
     assert space["threshold"] == 80 and space["role"] == "owner" and "ta" in space["languages"]
     assert {item["name"] for item in client.get(f"{ROOT}/samples").json()} == {
         "clean-printed", "handwritten-hindi", "changed-bank"}
+
+
+def test_hold_reasons_name_missing_fields_and_explain_bank_review(api, invoice):
+    client, _ = api
+    data = {key: value for key, value in invoice.items()
+            if key not in {"bank_reference", "acceptance_date", "written_agreement"}}
+    view = uploaded(client, render({"version": 1, "invoice": data, "display": {}}))
+    reason = next(item["text"] for item in view["reasons"] if item["code"] == "MISSING_FIELDS")
+    assert "acceptance date" in reason and "written agreement" in reason and "bank reference" in reason
+    assert "independently" in reason
+    assert not view["payment_ready"]
+
+
+def test_cash_hold_shows_amount_and_available_cash(api, invoice):
+    from app.models import Business
+
+    client, engine = api
+    with Session(engine) as session, session.begin():
+        session.get(Business, 1).cash_minor = 1000
+    view = uploaded(client, render({"version": 1, "invoice": invoice, "display": {}}))
+    reason = next(item["text"] for item in view["reasons"] if item["code"] == "INSUFFICIENT_CASH")
+    assert "INR 118.00" in reason and "INR 10.00" in reason
+
+
+def test_demo_processing_preserves_missing_checks_and_blocks_approval(api, invoice):
+    client, _ = api
+    data = {key: value for key, value in invoice.items() if key != "bank_reference"}
+    bill = uploaded(client, render({"version": 1, "invoice": data, "display": {}}))
+    url = f"{ROOT}/documents/{bill['document_id']}/review"
+    body = {"action": "process_demo", "note": "Demonstrate the review board."}
+    assert client.post(url, json=body, headers={"Authorization": "Bearer test-service"}).status_code == 403
+    response = client.post(url, json=body)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["lane"] == "PROCESSED" and not result["payment_ready"]
+    assert result["processing_override"] == "process_demo"
+    assert result["decision"]["overall_status"] == "HOLD" and result["reasons"]
+    assert issue(client, result["invoice_id"]).status_code == 409
+
+
+def test_tax_omission_keeps_tax_unknown_and_does_not_enable_payment(api, invoice):
+    client, _ = api
+    data = {key: value for key, value in invoice.items() if key not in {"cgst", "cgst_rate"}}
+    bill = uploaded(client, render({"version": 1, "invoice": data, "display": {}}))
+    response = client.post(f"{ROOT}/documents/{bill['document_id']}/review",
+                           json={"action": "skip_tax", "note": "Vendor did not provide the tax split."})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["lane"] == "PROCESSED" and not result["payment_ready"]
+    assert result["processing_override"] == "skip_tax"
+    assert "MISSING_FIELDS" in result["decision"]["risk_indicators"]
+    assert issue(client, result["invoice_id"]).status_code == 409
+
+
+def test_demo_processing_rejects_blocked_bill_and_can_be_undone(api, invoice):
+    client, _ = api
+    incomplete = {k: v for k, v in invoice.items() if k != "bank_reference"}
+    blocked = uploaded(client, render({"version": 1, "invoice": incomplete | {"grand_total": "4.00"}, "display": {}}))
+    payload = {"action": "process_demo", "note": "Show a demo bill."}
+    assert client.post(f"{ROOT}/documents/{blocked['document_id']}/review", json=payload).status_code == 409
+    eligible = uploaded(client, render({"version": 1, "invoice": incomplete | {"invoice_number": "UNDO-1",
+        "invoice_date": "2026-11-05"}, "display": {}}))
+    url = f"{ROOT}/documents/{eligible['document_id']}/review"
+    assert client.post(url, json=payload).status_code == 200
+    undone = client.post(url, json={"action": "return_to_review", "note": "Resume checks."}).json()
+    assert undone["lane"] == "ON_HOLD" and undone["processing_override"] is None

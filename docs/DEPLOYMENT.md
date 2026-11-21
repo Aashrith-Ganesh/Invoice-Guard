@@ -31,6 +31,22 @@ Authorization and Content-Type headers from the configured origins. Vite
 variables are public build settings. Supply all credentials through backend
 environment variables or an operator-managed secret store.
 
+## Separate hosted payment listener
+
+For a dedicated localhost demo origin, set
+`CHECK_HOSTED_PAYMENT_ORIGIN=http://127.0.0.1:8001` in the backend environment
+and restart the merchant process. From the same repository root, run
+`uvicorn app.hosted_payment:app --host 127.0.0.1 --port 8001`. Both processes
+need the same SQLite database and simulator secret. Build the frontend once
+before starting either process.
+
+Publish the dedicated listener over HTTPS if testers need to use it remotely.
+It serves the hosted payment page, compiled assets, health, and the two public
+simulator routes. Publish the merchant dashboard and approval API on the
+merchant origin. Use the complete generated URL including its fragment and
+keep it out of shared logs. Leave the setting empty to serve the hosted page
+on the merchant origin.
+
 ## Extraction and integrations
 
 `CHECK_DOCUMENT_EXTRACTOR=demo` reads only the structured synthetic demo format.

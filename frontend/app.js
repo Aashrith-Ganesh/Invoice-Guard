@@ -1,3 +1,4 @@
+import { bankReference } from "./bank-reference.js";
 import { UI, CHECK_NAMES } from "./i18n.js";
 
 const API = `${(import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "")}/api/v1`;
@@ -132,10 +133,12 @@ async function connect(key) {
   $("#connect").hidden = true;
   $("#shell").hidden = false;
   $("#brand-name").textContent = workspace.business_name;
-  $("#cash").textContent = inr(workspace.cash_available, workspace.currency);
+  showBalance(workspace.cash_available);
+  $("#adjust-balance").hidden = workspace.role !== "owner";
   $("#upload-context").hidden = workspace.extraction_mode !== "sarvam";
   $("#bank-context").hidden = workspace.role !== "owner";
   $("#sample-btn").hidden = workspace.extraction_mode !== "demo";
+  $("#clear-bills").hidden = !workspace.can_clear_bills;
   $("#file-input").multiple = workspace.extraction_mode === "demo";
   renderAll();
 }
@@ -159,10 +162,11 @@ async function loadOlder() {
 function disconnect(expired = false) {
   state.session.abort();
   Object.assign(state, { key: null, workspace: null, docs: [], pending: [], selected: null,
-    samples: null, olderCursor: null, session: new AbortController() });
+    samples: null, olderCursor: null, clearing: false, session: new AbortController() });
   state.payments.clear();
   state.translations.clear();
   if ($("#review-dialog").open) $("#review-dialog").close();
+  if ($("#balance-dialog").open) $("#balance-dialog").close();
   reviewing = null;
   $("#search-bills").value = "";
   $("#acceptance-date").value = "";
@@ -179,6 +183,34 @@ function disconnect(expired = false) {
   error.textContent = expired ? t("badKey") : "";
   $("#key-input").value = "";
   $("#key-input").focus();
+}
+
+async function clearBills() {
+  if ($("#clear-bills").disabled || !window.confirm(t("confirmClearBills"))) return;
+  let session = state.session;
+  state.clearing = true;
+  renderPending();
+  try {
+    await api("/documents/clear", { method: "POST" });
+    if (session.signal.aborted) return;
+    session.abort();
+    Object.assign(state, { docs: [], pending: [], olderCursor: null, session: new AbortController() });
+    session = state.session;
+    state.details.clear();
+    state.payments.clear();
+    state.translations.clear();
+    for (const url of state.pdfUrls.values()) URL.revokeObjectURL(url);
+    state.pdfUrls.clear();
+    closeDrawer();
+    toast(t("billsCleared"), "go");
+  } catch (error) {
+    if (!session.signal.aborted) toast(error.message, "stop");
+  } finally {
+    if (!session.signal.aborted && state.session === session) {
+      state.clearing = false;
+      renderAll();
+    }
+  }
 }
 
 /* ---------- Board ---------- */
@@ -200,7 +232,7 @@ function scoreBadge(doc) {
 function card(doc) {
   const inv = doc.invoice;
   const reason = doc.lane !== "PROCESSED" ? doc.reasons[0] : null;
-  return h("li", {}, h("button", {
+  const bill = h("button", {
     class: "card", type: "button", dataset: { id: doc.document_id },
     "aria-current": String(state.selected === doc.document_id),
     onclick: () => openDrawer(doc.document_id),
@@ -212,7 +244,24 @@ function card(doc) {
   h("span", { class: "card-meta" },
     h("span", { class: "card-ids" }, inv.invoice_number ? h("span", {}, inv.invoice_number) : null,
       inv.payment_deadline ? h("span", {}, `${t("payBy")} ${dateFmt(inv.payment_deadline)}`) : null),
-    scoreBadge(doc))));
+    scoreBadge(doc)));
+  if (doc.lane !== "PROCESSED") return h("li", {}, bill);
+  const flow = state.payments.get(doc.invoice_id);
+  const buttonClass = "btn btn-ghost card-payment";
+  if (doc.payment_ready && flow?.hosted) {
+    return h("li", {}, bill, h("a", {
+      class: "btn btn-primary card-payment", href: flow.hosted.path, target: "_blank", rel: "noopener noreferrer",
+      "aria-label": `${t("openPaymentLink")}: ${vendorName(doc)}`,
+    }, t("openPaymentLink")));
+  }
+  const canCreate = doc.payment_ready && !doc.payment && state.workspace.role === "owner" && flow?.approvalId;
+  const label = canCreate ? "createHostedLink"
+    : doc.payment ? "simulationStatus" : doc.payment_ready ? "paymentLink" : "paymentRestrictions";
+  return h("li", {}, bill, h("button", {
+    class: buttonClass, type: "button", disabled: flow?.busy,
+    "aria-label": `${t(label)}: ${vendorName(doc)}`,
+    onclick: () => canCreate ? paymentAction(doc, "link") : openDrawer(doc.document_id, true),
+  }, t(label)));
 }
 
 function renderBoard() {
@@ -234,6 +283,7 @@ function renderBoard() {
 }
 
 function renderPending() {
+  $("#clear-bills").disabled = Boolean(state.clearing || state.pending.some((item) => !item.failed));
   $("#pending").replaceChildren(...state.pending.map((item) => h("li", {},
     h("span", { class: "name" }, item.name),
     item.failed ? h("span", { class: "failed" }, item.failed)
@@ -241,10 +291,10 @@ function renderPending() {
 }
 
 /* ---------- Drawer ---------- */
-async function openDrawer(id) {
+async function openDrawer(id, showPayment = false) {
   const fresh = state.selected !== id;
   state.selected = id;
-  if (fresh) state.tab = "details";
+  if (fresh || showPayment) state.tab = "details";
   $("#scrim").hidden = false;
   const drawer = $("#detail");
   drawer.hidden = false;
@@ -254,7 +304,15 @@ async function openDrawer(id) {
   try {
     const full = await api(`/documents/${id}`);
     replaceDoc(full);
-    if (state.selected === id) { renderBoard(); renderDetail(); }
+    if (state.selected === id) {
+      renderBoard();
+      renderDetail();
+      if (showPayment) {
+        const panel = drawer.querySelector(".decision");
+        panel?.scrollIntoView({ block: "center" });
+        panel?.querySelector("button, a")?.focus({ preventScroll: true });
+      }
+    }
   } catch (error) { toast(error.message, "stop"); }
 }
 
@@ -291,6 +349,16 @@ function meter(doc, animate) {
 }
 
 function decisionPanel(doc) {
+  if (doc.processing_override) {
+    const action = doc.processing_override;
+    return h("section", { class: `decision ${doc.lane}` },
+      h("h3", {}, t(action === "skip_tax" ? "taxUnavailable" : "demoProcessed")),
+      h("p", {}, t("processingOnly")),
+      doc.reasons.length ? h("ul", { class: "reasons" },
+        doc.reasons.map((reason) => h("li", { class: reason.severity }, reason.text))) : null,
+      state.workspace.role === "owner" ? h("button", { class: "btn btn-ghost", type: "button",
+        onclick: () => openReview(doc, "return_to_review") }, t("returnToReview")) : null);
+  }
   if (doc.lane === "PROCESSED") {
     return h("section", { class: "decision PROCESSED" },
       h("h3", {}, t("readyTitle")),
@@ -306,6 +374,14 @@ function decisionPanel(doc) {
     return panel;
   }
   const actions = h("div", { class: "decision-actions" });
+  if (doc.can_skip_tax && state.workspace.role === "owner") {
+    actions.append(h("button", { class: "btn btn-ghost", type: "button",
+      onclick: () => openReview(doc, "skip_tax") }, t("taxUnavailable")));
+  }
+  if (doc.can_process_demo && state.workspace.demo_processing_enabled) {
+    actions.append(h("button", { class: "btn btn-ghost", type: "button",
+      onclick: () => openReview(doc, "process_demo") }, t("processDemo")));
+  }
   if (doc.can_verify && state.workspace.role === "owner") actions.append(h("button", { class: "btn btn-tape", type: "button", onclick: () => openReview(doc, "verify") }, t("verify")));
   if (doc.can_recheck) {
     const needsBank = doc.decision?.results.some((item) =>
@@ -464,6 +540,7 @@ function move(step) {
 
 /* ---------- Upload ---------- */
 function uploadFiles(files) {
+  if (state.clearing) return;
   if (state.workspace.extraction_mode === "sarvam" && files.length > 1) {
     toast(t("oneLiveFile"), "stop");
     return;
@@ -476,6 +553,7 @@ function uploadFiles(files) {
 }
 
 async function uploadOne(file) {
+  if (state.clearing) return;
   const session = state.session;
   const item = { name: file.name, failed: null };
   state.pending.unshift(item);
@@ -489,7 +567,11 @@ async function uploadOne(file) {
     })) {
       if (field === "confirmed_bank_reference" && state.workspace.role !== "owner") continue;
       const value = $(selector).value.trim();
-      if (value) form.append(field, value);
+      if (field === "confirmed_bank_reference") {
+        const reference = bankReference(value);
+        if (reference) form.append(field, reference);
+        else if (value) toast(t("bankUploadSkipped"));
+      } else if (value) form.append(field, value);
       $(selector).value = "";
     }
   }
@@ -533,16 +615,99 @@ async function toggleSampleMenu() {
   } catch (error) { toast(error.message, "stop"); }
 }
 
+/* ---------- Cash balance ---------- */
+function showBalance(balance) {
+  state.workspace.cash_available = balance;
+  $("#cash").textContent = inr(balance, state.workspace.currency);
+  $("#balance-current").textContent = `${t("cash")} ${$("#cash").textContent}`;
+}
+
+async function openBalance() {
+  const session = state.session;
+  const button = $("#adjust-balance");
+  button.disabled = true;
+  try {
+    const workspace = await api("/workspace");
+    if (session.signal.aborted) return;
+    showBalance(workspace.cash_available);
+    const input = $("#balance-input");
+    input.value = workspace.cash_available;
+    input.dataset.expected = workspace.cash_available;
+    $("#balance-error").hidden = true;
+    $("#balance-dialog").showModal();
+    input.select();
+  } catch (err) {
+    if (!session.signal.aborted) toast(err.message, "stop");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function submitBalance(event) {
+  event.preventDefault();
+  const session = state.session;
+  const input = $("#balance-input");
+  const save = $("#balance-save");
+  const error = $("#balance-error");
+  if (save.disabled) return;
+  save.disabled = true;
+  error.hidden = true;
+  try {
+    const result = await api("/workspace/balance", { method: "PATCH", json: {
+      cash_available: input.value, expected_balance: input.dataset.expected,
+    } });
+    if (session.signal.aborted) return;
+    showBalance(result.cash_available);
+    $("#balance-dialog").close();
+    toast(t("balanceSaved"), "go");
+    const docs = await api(documentPage());
+    if (session.signal.aborted) return;
+    state.docs = docs;
+    state.olderCursor = docs.length === PAGE_SIZE ? docs.at(-1).document_id : null;
+    state.details.clear();
+    closeDrawer();
+    renderAll();
+  } catch (err) {
+    if (session.signal.aborted) return;
+    if (err.code === "BALANCE_CHANGED") {
+      try {
+        const current = await api("/workspace");
+        if (session.signal.aborted) return;
+        showBalance(current.cash_available);
+        input.dataset.expected = current.cash_available;
+      } catch {
+        if (session.signal.aborted) return;
+      }
+    }
+    if ($("#balance-dialog").open) {
+      error.textContent = err.message;
+      error.hidden = false;
+    } else {
+      toast(err.message, "stop");
+    }
+  } finally {
+    save.disabled = false;
+  }
+}
+
 /* ---------- Review ---------- */
 let reviewing = null;
+const reviewLabels = {
+  verify: ["verifyTitle", "verifyBody", "verify", "verified"],
+  reject: ["rejectTitle", "rejectBody", "reject", "rejectedToast"],
+  skip_tax: ["taxUnavailable", "processingOnly", "taxUnavailable", "taxUnavailable"],
+  process_demo: ["processDemo", "processingOnly", "processDemo", "demoProcessed"],
+  return_to_review: ["returnToReview", "returnToReviewBody", "returnToReview", "returnToReview"],
+};
 
 function openReview(doc, action) {
   reviewing = { doc, action };
-  $("#review-title").textContent = t(action === "verify" ? "verifyTitle" : "rejectTitle");
-  $("#review-body").textContent = t(action === "verify" ? "verifyBody" : "rejectBody");
+  const [title, body, label] = reviewLabels[action];
+  $("#review-title").textContent = t(title);
+  $("#review-body").textContent = t(body);
   const submit = $("#review-submit");
-  submit.textContent = t(action === "verify" ? "verify" : "reject");
-  submit.className = `btn ${action === "verify" ? "btn-tape" : "btn-stop"}`;
+  submit.textContent = t(label);
+  submit.className = `btn ${action === "reject" ? "btn-stop" : "btn-tape"}`;
   $("#review-note").value = "";
   $("#review-note").placeholder = t("notePlaceholder");
   $("#review-error").hidden = true;
@@ -561,7 +726,7 @@ async function submitReview(event) {
     const updated = await api(`/documents/${doc.document_id}/review`, { method: "POST", json: { action, note } });
     $("#review-dialog").close();
     replaceDoc(updated);
-    toast(t(action === "verify" ? "verified" : "rejectedToast"), action === "verify" ? "go" : "stop");
+    toast(t(reviewLabels[action][3]), action === "reject" ? "stop" : "go");
     renderAll();
   } catch (err) {
     error.textContent = err.message;
@@ -571,11 +736,16 @@ async function submitReview(event) {
   }
 }
 
-async function recheck(doc, button, bankReference) {
+async function recheck(doc, button, enteredReference) {
+  const reference = bankReference(enteredReference || "");
+  if (enteredReference && !reference) {
+    toast(t("bankReferenceHint"), "stop");
+    return;
+  }
   button.disabled = true;
   try {
     await api(`/invoices/${doc.invoice_id}/revalidate`, { method: "POST",
-      json: bankReference ? { bank_reference: bankReference } : undefined });
+      json: reference ? { bank_reference: reference } : undefined });
     const updated = await api(`/documents/${doc.document_id}`);
     replaceDoc(updated);
     toast(updated.lane === "ON_HOLD" ? t("stillHold") : `${t("rechecked")}: ${t(LANE_LABEL[updated.lane])}`, updated.lane === "PROCESSED" ? "go" : "");
@@ -656,7 +826,7 @@ async function paymentAction(doc, action) {
       if (session.signal.aborted) return;
       replaceDoc({ ...doc, payment });
       const workspace = await api("/workspace");
-      $("#cash").textContent = inr(workspace.cash_available, workspace.currency);
+      if (!session.signal.aborted) showBalance(workspace.cash_available);
     }
   } catch (error) {
     if (["STALE_APPROVAL", "INVALID_APPROVAL", "APPROVAL_REQUIRED"].includes(error.code)) {
@@ -666,7 +836,10 @@ async function paymentAction(doc, action) {
     if (!session.signal.aborted) toast(error.message, "stop");
   } finally {
     flow.busy = false;
-    if (!session.signal.aborted && state.selected === doc.document_id) renderDetail();
+    if (!session.signal.aborted) {
+      renderBoard();
+      if (state.selected === doc.document_id) renderDetail();
+    }
   }
 }
 
@@ -697,11 +870,15 @@ function bind() {
   $("#file-input").addEventListener("change", (e) => { uploadFiles(e.target.files); e.target.value = ""; });
   $("#search-bills").addEventListener("input", renderBoard);
   $("#load-older").addEventListener("click", loadOlder);
+  $("#clear-bills").addEventListener("click", clearBills);
   $("#sample-btn").addEventListener("click", toggleSampleMenu);
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".menu-wrap")) { $("#sample-menu").hidden = true; $("#sample-btn").setAttribute("aria-expanded", "false"); }
   });
   $("#scrim").addEventListener("click", closeDrawer);
+  $("#adjust-balance").addEventListener("click", openBalance);
+  $("#balance-form").addEventListener("submit", submitBalance);
+  $("#balance-cancel").addEventListener("click", () => $("#balance-dialog").close());
   $("#review-form").addEventListener("submit", submitReview);
   $("#review-cancel").addEventListener("click", () => $("#review-dialog").close());
 
@@ -720,7 +897,7 @@ function bind() {
   });
 
   document.addEventListener("keydown", (e) => {
-    if (!state.workspace || e.metaKey || e.ctrlKey || e.altKey || $("#review-dialog").open) return;
+    if (!state.workspace || e.metaKey || e.ctrlKey || e.altKey || $("#review-dialog").open || $("#balance-dialog").open) return;
     if (e.key === "Escape" && state.selected) { closeDrawer(); return; }
     if (e.target.closest("input, textarea, select, [contenteditable]")) return;
     const doc = state.details.get(state.selected);

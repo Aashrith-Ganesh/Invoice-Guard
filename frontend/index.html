@@ -39,6 +39,7 @@
       </div>
       <div class="topbar-right">
         <p class="cash"><span data-t="cash"></span> <strong id="cash"></strong></p>
+        <button class="btn btn-quiet" id="adjust-balance" type="button" data-t="adjustBalance" hidden></button>
         <label class="select-wrap"><span class="sr" data-t="language"></span>
           <select id="ui-lang">
             <option value="en">English</option><option value="ta">தமிழ்</option><option value="hi">हिन्दी</option>
@@ -57,6 +58,7 @@
         <p class="muted" data-t="dropHint"></p>
       </div>
       <div class="intake-actions">
+        <button class="btn btn-ghost" id="clear-bills" type="button" data-t="clearBills" hidden></button>
         <div class="menu-wrap">
           <button class="btn btn-ghost" id="sample-btn" type="button" aria-haspopup="true" aria-expanded="false" data-t="trySample"></button>
           <div class="menu" id="sample-menu" role="menu" hidden></div>
@@ -80,7 +82,8 @@
         </select>
       </label>
       <label id="bank-context"><span data-t="confirmedBank"></span>
-        <input id="confirmed-bank" type="text" maxlength="128" autocomplete="off" spellcheck="false">
+        <input id="confirmed-bank" type="text" maxlength="128" autocomplete="off" spellcheck="false" aria-describedby="bank-reference-hint">
+        <small id="bank-reference-hint" class="muted" data-t="bankReferenceHint"></small>
       </label>
     </details>
 
@@ -128,6 +131,20 @@
       <div class="dialog-actions">
         <button class="btn btn-quiet" value="cancel" type="button" id="review-cancel" data-t="cancel"></button>
         <button class="btn btn-primary" id="review-submit" type="submit"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="balance-dialog" class="dialog" aria-labelledby="balance-title">
+    <form id="balance-form">
+      <h3 id="balance-title" data-t="adjustBalance"></h3>
+      <p class="muted" id="balance-current"></p>
+      <label for="balance-input" data-t="newBalance"></label>
+      <input id="balance-input" inputmode="decimal" required maxlength="13" pattern="[0-9]+([.][0-9]{1,2})?">
+      <p id="balance-error" class="form-error" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" type="button" id="balance-cancel" data-t="cancel"></button>
+        <button class="btn btn-primary" type="submit" id="balance-save" data-t="saveBalance"></button>
       </div>
     </form>
   </dialog>
