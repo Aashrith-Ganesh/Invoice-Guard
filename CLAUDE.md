@@ -37,7 +37,7 @@ app/services/      validation, duplicate, vendor, prioritisation, invoice, appro
 app/models/        SQLAlchemy models; every table is business-scoped (business_id)
 app/schemas/       pydantic request/response models
 app/core/          config (env), security (token hash), exceptions (reject()), masking
-app/integrations/  cashfree/simulator.py (local payout simulator); sarvam/ and relay/ are EMPTY
+app/integrations/  cashfree/simulator.py (local payout simulator); sarvam/ (chat and document HTTP clients); relay/ is empty
 scripts/           seed, demo, verify_demo_bank
 tests/             conftest (api fixture), test_invoices, test_payments, test_red_lines
 migrations/        Alembic
@@ -69,7 +69,7 @@ Test map: RL1 `test_invoices`/`test_payments`/`test_red_lines`; RL2 `test_paymen
 ## Known gaps vs the original spec (open work, in priority order)
 
 1. **Amount in words:** no check that `total_in_words` equals the figures (needs lakh/crore and Indian-script digit parsing).
-2. **Prism signals:** `app/integrations/sarvam/` is empty. Same-vendor-despite-spelling, disguised duplicate, amount-in-words via `client.decisions.create` (model `sarvam-prism`, `sarvamai>=0.1.43`). Prism may raise a HOLD, never clear a BLOCK.
+2. **Prism signals:** Chat and extraction adapters exist. Prism signals remain open. Same-vendor-despite-spelling, disguised duplicate, amount-in-words via `client.decisions.create` (model `sarvam-prism`, `sarvamai>=0.1.43`). Prism may raise a HOLD, never clear a BLOCK.
 3. **Weekly batch + one-time code:** no batch endpoint, no code bound to `batch_id` + total. Today approval is per invoice.
 4. **Real Cashfree sandbox payouts:** payouts are simulated (`integrations/cashfree/simulator.py`). Replace behind the same interface; keep sandbox-only.
 5. **Remaining spec gaps:** no bank name-match check from Secure ID; Udyam deadline logic exists but there is no "stop at available cash" batch selection.

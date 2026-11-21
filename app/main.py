@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
+from app.api import agent_routes, document_routes
 from app.api.v1 import approvals, invoices, payments, webhooks
 from app.core.config import Settings
 from app.core.masking import install_account_masking
@@ -21,6 +22,8 @@ def create_app() -> FastAPI:
     application = FastAPI(title="Accounts Payable Check Service", lifespan=lifespan)
     application.state.settings = Settings.from_env()
     application.state.engine = make_engine(application.state.settings.database_url)
+    application.include_router(agent_routes.router)
+    application.include_router(document_routes.router)
     for routes in (invoices, approvals, payments, webhooks):
         application.include_router(routes.router, prefix="/api/v1")
 

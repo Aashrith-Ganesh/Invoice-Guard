@@ -11,3 +11,4 @@ __all__ = [
     "Approval", "AuditLog", "Business", "Invoice", "InvoiceValidation", "Payment",
     "Vendor", "VendorBankAccount",
 ]
+from app.models.document_job import DocumentJob
