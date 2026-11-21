@@ -1,7 +1,7 @@
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import reject
@@ -23,16 +23,23 @@ def scoped_invoice(session: Session, business_id: int, invoice_id: int) -> Invoi
     return invoice
 
 
-def latest_checks(session: Session, invoice: Invoice) -> list[Check]:
-    query = select(InvoiceValidation).where(
-        InvoiceValidation.business_id == invoice.business_id, InvoiceValidation.invoice_id == invoice.id,
+def canonical_validations(invoice: Invoice) -> Select[tuple[InvoiceValidation]]:
+    return select(InvoiceValidation).where(
+        InvoiceValidation.business_id == invoice.business_id,
+        InvoiceValidation.invoice_id == invoice.id,
         InvoiceValidation.duplicate_submission.is_(False),
     )
-    run_id = session.scalar(query.with_only_columns(InvoiceValidation.run_id)
-                            .order_by(InvoiceValidation.id.desc()).limit(1))
-    return [Check.model_validate(row) for row in session.scalars(
-        query.where(InvoiceValidation.run_id == run_id).order_by(InvoiceValidation.id)
-    )]
+
+
+def current_validation_run(session: Session, invoice: Invoice) -> str | None:
+    return session.scalar(canonical_validations(invoice).with_only_columns(InvoiceValidation.run_id)
+                          .order_by(InvoiceValidation.id.desc()).limit(1))
+
+
+def latest_checks(session: Session, invoice: Invoice) -> list[Check]:
+    run_id = current_validation_run(session, invoice)
+    query = canonical_validations(invoice).where(InvoiceValidation.run_id == run_id)
+    return [Check.model_validate(row) for row in session.scalars(query.order_by(InvoiceValidation.id))]
 
 
 def outcome(checks: list[Check]) -> Status:

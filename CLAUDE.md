@@ -68,7 +68,7 @@ Test map: RL1 `test_invoices`/`test_payments`/`test_red_lines`; RL2 `test_paymen
 
 ## Known gaps vs the original spec (open work, in priority order)
 
-1. **Amount in words:** no check that `total_in_words` equals the figures (needs lakh/crore and Indian-script digit parsing).
+1. **Amount in words:** English INR wording with lakh/crore/paise and Unicode decimal digits is validated deterministically. Tamil and Hindi number words still require manual review.
 2. **Prism signals:** `app/integrations/sarvam/` is empty. Same-vendor-despite-spelling, disguised duplicate, amount-in-words via `client.decisions.create` (model `sarvam-prism`, `sarvamai>=0.1.43`). Prism may raise a HOLD, never clear a BLOCK.
 3. **Weekly batch + one-time code:** no batch endpoint, no code bound to `batch_id` + total. Today approval is per invoice.
 4. **Real Cashfree sandbox payouts:** payouts are simulated (`integrations/cashfree/simulator.py`). Replace behind the same interface; keep sandbox-only.

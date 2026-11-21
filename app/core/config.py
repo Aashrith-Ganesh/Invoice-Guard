@@ -1,15 +1,16 @@
 import json
 import os
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, PositiveInt, TypeAdapter
+from pydantic import BaseModel, PositiveInt, StringConstraints, TypeAdapter
 
 
 class Principal(BaseModel):
     business_id: PositiveInt
     role: Literal["service", "owner"]
+    subject: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$")] | None = None
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,7 @@ from app.integrations.cashfree.simulator import TRANSITIONS, simulated_reference
 from app.models import Approval, AuditLog, Business, Payment
 from app.schemas.payment import InitiateRequest, PaymentView, SimulatorEvent
 from app.services.approval_service import approval_matches, ensure_attempt_allowed, latest_payment, require_eligible
-from app.services.invoice_service import scoped_invoice
+from app.services.invoice_service import current_validation_run, scoped_invoice
 
 
 def payment_view(attempt: Payment) -> PaymentView:
@@ -32,7 +32,8 @@ def initiate(session: Session, business: Business, request: InitiateRequest) -> 
     approval = session.scalar(select(Approval).where(
         Approval.business_id == business.id, Approval.id == request.approval_id,
     ))
-    if approval is None or approval.confirmed_at is None or not approval_matches(approval, invoice):
+    if (approval is None or approval.confirmed_at is None
+            or not approval_matches(approval, invoice, current_validation_run(session, invoice))):
         raise reject(409, "APPROVAL_REQUIRED", "A current confirmed owner approval is required.")
 
     ensure_attempt_allowed(latest_payment(session, invoice), approval.control_payment_id)

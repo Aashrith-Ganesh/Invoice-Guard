@@ -11,7 +11,8 @@ from scripts.seed import seed
 def api(tmp_path, monkeypatch):
     monkeypatch.setenv("CHECK_DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setenv("CHECK_BEARER_KEYS", json.dumps({
-        "test-owner": {"business_id": 1, "role": "owner"},
+        "test-owner": {"business_id": 1, "role": "owner", "subject": "demo-owner"},
+        "second-owner": {"business_id": 1, "role": "owner", "subject": "second-demo-owner"},
         "test-service": {"business_id": 1, "role": "service"},
         "other-owner": {"business_id": 2, "role": "owner"},
     }))

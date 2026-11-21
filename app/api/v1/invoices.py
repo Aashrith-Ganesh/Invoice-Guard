@@ -1,6 +1,7 @@
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, Request
+from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,7 +20,10 @@ router = APIRouter(prefix="/invoices", tags=["invoices"])
 
 
 async def original_json(request: Request) -> dict:
-    return await request.json()
+    try:
+        return await request.json()
+    except ValueError:
+        raise RequestValidationError([{"loc": ("body",), "type": "json_invalid"}]) from None
 
 
 @router.post("/validate")

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Principal
 from app.core.exceptions import reject
+from app.core.security import token_hash
 from app.models import Business
 
 bearer = HTTPBearer(auto_error=False)
@@ -30,6 +31,8 @@ def authenticate(
             if key and compare_digest(key.encode(), credentials.credentials.encode()):
                 with Session(engine) as session:
                     if session.get(Business, principal.business_id):
+                        if principal.subject is None:
+                            return principal.model_copy(update={"subject": f"credential:{token_hash(key)}"})
                         return principal
     error = reject(401, "UNAUTHENTICATED", "A valid business bearer credential is required.")
     error.headers = {"WWW-Authenticate": "Bearer"}

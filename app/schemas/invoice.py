@@ -52,6 +52,7 @@ class ExtractedInvoice(BaseModel):
     igst: Money | None = None
     tax_total: Money | None = None
     grand_total: Money | None = None
+    total_in_words: Annotated[str, Field(max_length=300)] | None = None
     confidence: Annotated[dict[Label, Confidence], Field(max_length=100)] | None = None
 
     @field_validator("invoice_number")

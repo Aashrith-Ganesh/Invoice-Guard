@@ -3,6 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from app.models import Business, Vendor
 from app.schemas.invoice import ExtractedInvoice
 from app.schemas.validation import Check
+from app.services.amount_in_words import parse_minor
 
 CENT = Decimal("0.01")
 TAXES = ("cgst", "sgst", "igst")
@@ -48,7 +49,25 @@ def arithmetic(data: ExtractedInvoice, tolerance: Decimal) -> list[Check]:
         checks.append(Check(code="MIXED_GST", status="BLOCK", detail="IGST cannot be combined with CGST or SGST."))
     if data.grand_total == 0:
         checks.append(Check(code="ZERO_TOTAL", status="BLOCK", detail="Payment amount must be positive."))
+    if data.total_in_words is not None and data.grand_total is not None:
+        checks.append(check_amount_in_words(data))
     return checks
+
+
+def check_amount_in_words(data: ExtractedInvoice) -> Check:
+    fields = ["total_in_words", "grand_total"]
+    try:
+        if data.currency != "INR":
+            raise ValueError("Currency is unsupported")
+        stated_minor = parse_minor(data.total_in_words)
+    except ValueError:
+        return Check(code="AMOUNT_IN_WORDS_UNRECOGNIZED", status="HOLD",
+                     detail="The written amount needs manual verification.", fields=fields)
+    if stated_minor != minor(data.grand_total):
+        return Check(code="AMOUNT_IN_WORDS_MISMATCH", status="BLOCK",
+                     detail="The written amount differs from the numeric total.", fields=fields)
+    return Check(code="AMOUNT_IN_WORDS_MATCH", status="PASS",
+                 detail="The written amount matches the numeric total.", fields=fields)
 
 
 def completeness(business: Business, vendor: Vendor | None, data: ExtractedInvoice) -> list[Check]:
@@ -59,7 +78,8 @@ def completeness(business: Business, vendor: Vendor | None, data: ExtractedInvoi
     checks = [Check(code="MISSING_FIELDS" if missing else "COMPLETE", status="HOLD" if missing else "PASS",
                     detail="Mandatory fields are missing." if missing else "Mandatory fields are present.", fields=missing)]
     if data.confidence is not None:
-        low = sorted(field for field in required if field in data.confidence and data.confidence[field] < Decimal(
+        critical = required + (["total_in_words"] if data.total_in_words is not None else [])
+        low = sorted(field for field in critical if field in data.confidence and data.confidence[field] < Decimal(
             business.field_confidence_thresholds.get(field, business.confidence_threshold)
         ))
         checks.append(Check(code="LOW_CONFIDENCE" if low else "EXTRACTION_CONFIDENCE",
