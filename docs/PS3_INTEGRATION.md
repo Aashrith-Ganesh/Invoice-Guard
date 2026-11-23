@@ -12,8 +12,9 @@ was `ee9338e`.
 - `.env.example` retains both sets of configuration. The Sarvam clients use
   HTTPX and the documented REST endpoints. No additional provider SDK is needed.
 - Merge revision `5f2c9b0a7e41` preserves both original migration histories.
-  `61a7b39e25c0` adds a document digest and an original-extraction snapshot and
-  is the sole head.
+  `61a7b39e25c0` adds a document digest and an original-extraction snapshot.
+  Later merchant-app work added `6a45e007213f` (hosted simulation links), which
+  is now the sole head.
 - The shared Relay and Sarvam extraction schema retains supplier/buyer separation
   and the full GST breakdown. The input contract excludes raw bank details and
   requests only printed opaque references. Bank confirmation requires an
@@ -48,5 +49,7 @@ its merchant OAuth remain separate.
 The original vanilla JavaScript merchant app is built with npm and Vite.
 Development uses an API proxy and the production bundle is served by FastAPI.
 The UI uses the document, review, translation, owner approval and simulator
-status endpoints, with a memory-only browser session. The merchant extraction
+status endpoints, with a memory-only browser session. Owners can also create
+hosted simulation links (`frontend/pay.html`), served on the merchant origin or
+by the restricted `app.hosted_payment` listener; see the [demo runbook](DEMO.md). The merchant extraction
 mode can use the shared Sarvam REST job client. See [deployment](DEPLOYMENT.md).

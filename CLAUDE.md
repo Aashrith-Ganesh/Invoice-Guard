@@ -31,18 +31,27 @@ Google Sheet "PS3 Ledger" is the audit trail, one row per invoice.
 ### Layout (what exists)
 
 ```
-app/api/v1/        invoices, approvals, payments, webhooks routers (thin; logic lives in services)
-app/services/      validation, duplicate, vendor, prioritisation, invoice, approval, payment,
-                   document (PDF upload), review_policy (lane rule), view, plain_language, samples
+app/api/v1/        invoices, approvals, payments, webhooks, documents (merchant app), payment_links, mcp_access
+                   routers (thin; logic lives in services)
+app/api/           agent_routes (/api/v1/agent-runs), document_routes (/api/agents/sarvam), dependencies (auth)
+app/services/      validation, amount_in_words, duplicate, vendor, prioritisation, invoice, approval, payment,
+                   payment_link (hosted simulation links), document (PDF upload), review_policy (lane rule), view,
+                   plain_language, samples
 app/models/        SQLAlchemy models; every table is business-scoped (business_id)
 app/schemas/       pydantic request/response models
 app/core/          config (env), security (token hash), exceptions (reject()), masking
-app/integrations/  cashfree/simulator.py (local payouts); sarvam/ = Document AI and chat HTTP clients, plus the merchant
-                   app's offline stand-ins (demo extractor, heuristic Prism) and Mayura translate (live with SARVAM_API_KEY)
-frontend/          merchant app (static ES modules, no build step), served at /app
-scripts/           seed, demo, verify_demo_bank
-tests/             conftest (api fixture), test_invoices, test_payments, test_red_lines
-migrations/        Alembic
+app/integrations/  cashfree/simulator.py (local payouts); relay/intake.py (decision event to the Relay webhook);
+                   sarvam/ = Document AI and chat HTTP clients, invoice mapping, plus the merchant app's offline
+                   stand-ins (demo extractor, heuristic Prism) and Mayura translate (live with SARVAM_API_KEY)
+app/agent_framework/, app/tools/   local agent runtime and tool registry (vendor lookup only)
+app/mcp_server/    stdio MCP server (read-only tools + validation preview, `mcp` role)
+app/hosted_payment.py  restricted ASGI listener serving only the hosted simulator page and its two routes
+frontend/          merchant app + hosted page `pay.html` (vanilla JS, Vite build to frontend/dist, served at /app)
+scripts/           seed, demo, verify_demo_bank, intake_invoice, make_test_invoice, send_test_invoice
+tests/             conftest (api fixture, relay_events), test_invoices, test_payments, test_red_lines, test_documents,
+                   test_payment_links, test_balance, test_clear_bills, test_full_stack, test_relay_intake,
+                   test_sarvam, test_registry, test_mcp; fixtures/ (synthetic invoice PNGs)
+migrations/        Alembic (single head)
 ```
 
 ### Endpoints and authentication
@@ -51,8 +60,13 @@ migrations/        Alembic
 `POST invoices/{id}/revalidate`, `POST approvals` (owner), `POST approvals/confirm` (owner),
 `POST payments/initiate`, `GET payments/{id}`, `POST webhooks/payout` (HMAC-signed), `GET /health`.
 The payment and validation routes use `/api/v1`. Sarvam document upload, status, completed-job validation, and translation use `/api/agents/sarvam`. Local agent runs use `/api/v1/agent-runs`; the only registered model tool is a tenant-scoped vendor lookup.
-Merchant app (`/api/v1`): `GET workspace`, `POST documents` (PDF), `GET documents`, `GET documents/{id}`, `GET documents/{id}/file`,
-`POST documents/{id}/review` (owner; verify|reject), `POST documents/{id}/translate`, `GET samples`, `GET samples/{name}`.
+Merchant app (`/api/v1`): `GET workspace`, `PATCH workspace/balance` (owner), `POST documents` (PDF), `GET documents`,
+`POST documents/clear` (owner, demo reset), `GET documents/{id}`, `GET documents/{id}/file`,
+`POST documents/{id}/review` (owner; verify|reject|skip_tax|process_demo|return_to_review), `POST documents/{id}/translate`,
+`GET samples`, `GET samples/{name}`.
+Hosted simulation links (`/api/v1`): `POST payments/links` (owner, needs a confirmed approval),
+`POST simulated-payment/status`, `POST simulated-payment/simulate` (public, authorised by the link token).
+MCP (`/api/v1`, `mcp` role): `GET mcp/access`, `POST mcp/invoice-preview` (non-persisting).
 
 Validation returns HTTP 200 with PASS/HOLD/BLOCK; 422 malformed, 401/403 auth, 404 scoped miss, 409 bad transition.
 
@@ -64,7 +78,11 @@ Validation returns HTTP 200 with PASS/HOLD/BLOCK; 422 malformed, 401/403 auth, 4
   decided in code by `review_policy.lane`: **Processed** = rule checks PASS and (Prism rating >= 80 or a person verified it);
   **On hold** otherwise. A rating can't clear a rule HOLD/BLOCK, and "verify" is refused unless rules pass. An on-hold or
   rejected document blocks approval (`REVIEW_REQUIRED` / `INVOICE_REJECTED` in `approval_service.require_eligible`).
-  Payment UI belongs to Cashfree's site; our "Continue to payment" only posts `payables:payment-ready` to the host page.
+  The demo overrides `skip_tax`/`process_demo` (owner, only when demo processing is enabled) move a card for display but
+  never clear the rule checks, so payment stays blocked; `return_to_review` undoes them.
+- **Hosted payment (Nov 2026):** "Payment link" on a processed card → owner approval → a hosted simulation link
+  (`pay.html#token`) that expires with the approval. "Simulate Payment" rechecks approval and eligibility and records one
+  simulated payment through the normal payment service. No real gateway, no payment details collected.
 
 ## Red lines
 

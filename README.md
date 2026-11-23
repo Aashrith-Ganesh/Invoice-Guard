@@ -93,6 +93,17 @@ Business and role come from the Bearer credential. `owner` can issue and confirm
 | POST | `/api/v1/payments/initiate` | Simulated attempt, or the existing record for an identical idempotent request |
 | GET | `/api/v1/payments/{payment_id}` | Current simulated attempt |
 | POST | `/api/v1/webhooks/payout` | Apply a signed simulator event |
+| GET | `/api/v1/workspace` | Merchant workspace summary, role and enabled demo controls |
+| PATCH | `/api/v1/workspace/balance` | Owner adjusts the synthetic available balance |
+| POST | `/api/v1/documents` | Upload a bill PDF (or sample) for extraction, checks and Prism rating |
+| GET | `/api/v1/documents`, `/api/v1/documents/{id}`, `/api/v1/documents/{id}/file` | Bill list, detail and original PDF |
+| POST | `/api/v1/documents/{id}/review` | Owner `verify`, `reject`, or demo `skip_tax` / `process_demo` / `return_to_review` |
+| POST | `/api/v1/documents/{id}/translate` | Display translation of a bill's explanation |
+| POST | `/api/v1/documents/clear` | Owner clears synthetic bills and payments (demo reset only) |
+| GET | `/api/v1/samples`, `/api/v1/samples/{name}` | Synthetic sample PDFs |
+| POST | `/api/v1/payments/links` | Owner creates a hosted simulation link for a confirmed approval |
+| POST | `/api/v1/simulated-payment/status`, `/api/v1/simulated-payment/simulate` | Hosted page status and one-time simulated settlement |
+| GET | `/api/v1/mcp/access`, POST `/api/v1/mcp/invoice-preview` | MCP credential check and non-persisting validation preview |
 
 Validation decisions use HTTP 200 for PASS, HOLD, and BLOCK. Structurally malformed requests use 422, invalid credentials use 401, authorization failures use 403, missing tenant-scoped resources use 404, and invalid state transitions use 409. Batch requests accept up to 100 items and commit each valid item independently.
 

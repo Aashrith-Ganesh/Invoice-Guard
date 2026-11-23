@@ -18,7 +18,7 @@ A small hardware wholesaler's invoices (Tamil, Hindi, English; printed and handw
 If your task seems to require crossing one of these, stop and ask the human. LLMs advise, code decides: no model output may directly approve or release money.
 
 ## How to work
-- Start by running `python -m pytest -q`. The baseline must be green (34 tests at handoff). Show the output again before you say anything is done.
+- Start by running `python -m pytest -q`. The baseline must be green (116 tests as of Nov 2026). If you touch `frontend/`, also run `npm run lint && npm run typecheck && npm test` there. Show the output again before you say anything is done.
 - Write the failing test first, then the change. Do not delete or weaken an existing test to make something pass.
 - Keep changes small and on a feature branch named `feature/<topic>`. Do not commit to `main` or force-push. Open a PR; list which red lines and tests are touched.
 - Do not rename or remove existing endpoints, response fields or reason codes. Additions are fine. Relay flows depend on them. If a change is breaking, say so explicitly in the PR.
@@ -28,14 +28,15 @@ If your task seems to require crossing one of these, stop and ask the human. LLM
 - Don't expand scope. If you find something wrong outside your task, report it instead of fixing it silently.
 
 ## Open work (pick one per branch; check with the human to avoid overlap)
-1. Amount-in-words check: parse `total_in_words` (English, Hindi, Tamil; lakh/crore; Indian-script digits) and compare to the figure. Mismatch → at least HOLD.
-2. Prism client in `app/integrations/sarvam/` (`sarvam-prism`, `client.decisions.create`) for: same vendor despite spelling, disguised duplicate, amount-in-words. Advisory only: may raise HOLD, never clear a BLOCK.
+1. Amount-in-words in Tamil and Hindi: English INR wording (lakh/crore/paise, Unicode digits) is already checked deterministically in `app/services/amount_in_words.py`; Tamil and Hindi number words still hold for manual review. Mismatch → at least HOLD.
+2. Live Prism client in `app/integrations/sarvam/` (`sarvam-prism`, `client.decisions.create`) to replace or complement `HeuristicPrism` for: same vendor despite spelling, disguised duplicate, amount-in-words. Advisory only: may raise HOLD, never clear a BLOCK.
 3. Weekly batch: endpoint returning the prioritised batch within available cash, plus a one-time code bound to `batch_id` + total, single use, expiring. It must feed the existing approval and payment path, not bypass it.
-4. Real Cashfree sandbox payouts behind the existing simulator interface (`transfer_id` / idempotency from the invoice or attempt, signature-verified webhooks).
-5. `GET /files/{name}` serving synthetic invoice images.
-
+4. Real Cashfree sandbox payouts behind the existing simulator interface (`transfer_id` / idempotency from the invoice or attempt, signature-verified webhooks). The hosted simulation link must keep going through the same payment service.
+5. Bank name-match check from Secure ID.
+6. `GET /files/{name}` serving synthetic invoice images.
 
 ## Agreed decisions
+- Merchant lanes are decided in code (`review_policy.lane`); a Prism rating or a demo override never clears a rule HOLD/BLOCK.
 - A changed bank reference is a HOLD (`BANK_CHANGE`), and a same vendor/date/amount duplicate with a different invoice number is a HOLD (`POSSIBLE_DUPLICATE`). Both stay HOLD; HOLD blocks approval and payout until cleared. Do not change them to BLOCK.
 
 ## Report back with
